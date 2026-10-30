@@ -762,14 +762,23 @@ button, .button, .icon-button, .text-button, .workflow-nav button {
   .upload-zone { min-width: 0; gap: 10px; }
   .upload-zone > div { flex: 1 1 calc(100% - 55px); min-width: 0; }
   .line-row {
-    grid-template-columns: 40px minmax(0, 1fr) 40px 40px 40px;
+    grid-template-columns: 36px minmax(0, 1fr) 40px 40px 40px;
+    grid-template-areas:
+      "number input move-up move-down remove"
+      ". select select bold bold";
     gap: 7px;
     padding: 8px;
   }
-  .line-no { min-width: 34px; min-height: 34px; }
+  .line-row > .drag-handle { grid-area: number; }
+  .line-row > .line-input { grid-area: input; min-width: 0; }
+  .line-row > select { grid-area: select; min-width: 0; }
+  .line-row > .bold-toggle { grid-area: bold; min-height: 36px; }
+  .line-row > .line-move-up { grid-area: move-up; }
+  .line-row > .line-move-down { grid-area: move-down; }
+  .line-row > .line-remove { grid-area: remove; }
+  .line-no { min-width: 34px; min-height: 40px; }
   .line-row .icon-button { width: 40px; height: 40px; }
   .line-row select { min-height: 42px; }
-  .line-row .bold-toggle { min-height: 36px; }
   .settings-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .queue-control { min-width: 0; }
   .queue-control select, .queue-control input { min-width: 0; }
@@ -847,3 +856,15 @@ button, .button, .icon-button, .text-button, .workflow-nav button {
     transform: none;
   }
 }
+
+@media (max-width: 360px) {
+  .line-row {
+    grid-template-columns: 32px minmax(0, 1fr) 36px 36px 36px;
+    grid-template-areas:
+      "number input move-up move-down remove"
+      ". select select bold bold";
+    gap: 5px;
+  }
+  .line-row .icon-button { width: 36px; height: 40px; }
+}
+.upload-browse-label { pointer-events: none; }
