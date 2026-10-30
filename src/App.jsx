@@ -7,7 +7,7 @@ const sampleRows = [
   { 'Student Name': 'Abhay Pratap Singh', 'Reg No': '2412158', Salutation: 'Mr.', Gender: 'Male', 'Father Name': 'Vijendra Singh', Address: 'Sample House, Sector 10', City: 'Noida', State: 'Uttar Pradesh', Pincode: '201301', 'Mobile No': '9876543210', 'Father Phone no:': '9876501234' }
 ];
 const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
-const defaults = { pageSize: 'A4', orientation: 'portrait', customPageWidth: 210, customPageHeight: 297, labelWidth: 99.1, labelHeight: 33.9, columns: 2, rows: 8, gapX: 2, gapY: 0, padding: 3, fontSize: 11, lineGap: 1.5, alignment: 'center', vertical: 'center', printMarginTop: 12, printMarginSide: 3, printOffsetX: 0, printOffsetY: 0 };
+const defaults = { pageSize: 'A4', orientation: 'portrait', customPageWidth: 210, customPageHeight: 297, labelWidth: 99.1, labelHeight: 33.9, columns: 2, rows: 8, gapX: 2, gapY: 0, padding: 3, fontSize: 11, lineGap: 1.5, alignment: 'center', vertical: 'center', printMarginTop: 12, printMarginRight: 3, printMarginBottom: 12, printMarginLeft: 3, printMarginSide: 3, gridAlignX: 'center', gridAlignY: 'top', printOffsetX: 0, printOffsetY: 0 };
 const norm = value => String(value ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
 const getValue = (record, heading) => { const key = Object.keys(record).find(item => norm(item) === norm(heading)); return key ? String(record[key] ?? '').trim() : ''; };
 
@@ -83,13 +83,19 @@ function BarcodeVisual({ value, format = 'CODE128', foreground = '#111111', back
 }
 
 function normalizeSettings(value = {}) {
-  const merged = { ...defaults, ...(value && typeof value === 'object' ? value : {}) };
+  const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  const merged = { ...defaults, ...source };
+  // Migrate saved projects that used one shared side margin and a shared top/bottom margin.
+  if (!Object.prototype.hasOwnProperty.call(source, 'printMarginLeft')) merged.printMarginLeft = source.printMarginSide ?? defaults.printMarginLeft;
+  if (!Object.prototype.hasOwnProperty.call(source, 'printMarginRight')) merged.printMarginRight = source.printMarginSide ?? defaults.printMarginRight;
+  if (!Object.prototype.hasOwnProperty.call(source, 'printMarginBottom')) merged.printMarginBottom = source.printMarginTop ?? defaults.printMarginBottom;
   const ranges = {
     customPageWidth: [50, 2000], customPageHeight: [50, 2000],
     labelWidth: [5, 1000], labelHeight: [5, 1000],
     columns: [1, 8], rows: [1, 30], gapX: [0, 100], gapY: [0, 100],
     padding: [0, 20], fontSize: [5, 36], lineGap: [0, 20],
-    printMarginTop: [0, 40], printMarginSide: [0, 40],
+    printMarginTop: [0, 40], printMarginRight: [0, 40],
+    printMarginBottom: [0, 40], printMarginLeft: [0, 40],
     printOffsetX: [-40, 40], printOffsetY: [-40, 40]
   };
   for (const [key, [min, max]] of Object.entries(ranges)) {
@@ -100,6 +106,9 @@ function normalizeSettings(value = {}) {
   if (!['portrait', 'landscape'].includes(merged.orientation)) merged.orientation = defaults.orientation;
   if (!['left', 'center', 'right'].includes(merged.alignment)) merged.alignment = defaults.alignment;
   if (!['top', 'center', 'bottom'].includes(merged.vertical)) merged.vertical = defaults.vertical;
+  if (!['left', 'center', 'right'].includes(merged.gridAlignX)) merged.gridAlignX = defaults.gridAlignX;
+  if (!['top', 'center', 'bottom'].includes(merged.gridAlignY)) merged.gridAlignY = defaults.gridAlignY;
+  merged.printMarginSide = merged.printMarginLeft;
   merged.columns = Math.round(merged.columns);
   merged.rows = Math.round(merged.rows);
   return merged;
@@ -116,22 +125,29 @@ function getPageMetricsForSettings(settings) {
   const rows = Math.max(1, Math.round(Number(settings.rows) || 1));
   const labelWidth = Number(settings.labelWidth), labelHeight = Number(settings.labelHeight);
   const gapX = Number(settings.gapX), gapY = Number(settings.gapY);
-  const printMarginTop = Number(settings.printMarginTop), printMarginSide = Number(settings.printMarginSide);
+  const printMarginTop = Number(settings.printMarginTop);
+  const printMarginRight = Number(settings.printMarginRight);
+  const printMarginBottom = Number(settings.printMarginBottom);
+  const printMarginLeft = Number(settings.printMarginLeft);
   const printOffsetX = Number(settings.printOffsetX), printOffsetY = Number(settings.printOffsetY);
-  const valid = [pageWidth, pageHeight, labelWidth, labelHeight, gapX, gapY, printMarginTop, printMarginSide, printOffsetX, printOffsetY].every(Number.isFinite)
+  const valid = [pageWidth, pageHeight, labelWidth, labelHeight, gapX, gapY, printMarginTop, printMarginRight, printMarginBottom, printMarginLeft, printOffsetX, printOffsetY].every(Number.isFinite)
     && pageWidth > 0 && pageHeight > 0 && labelWidth > 0 && labelHeight > 0
-    && gapX >= 0 && gapY >= 0 && printMarginTop >= 0 && printMarginSide >= 0;
-  const printableWidth = pageWidth - printMarginSide * 2;
-  const printableHeight = pageHeight - printMarginTop * 2;
+    && gapX >= 0 && gapY >= 0 && printMarginTop >= 0 && printMarginRight >= 0 && printMarginBottom >= 0 && printMarginLeft >= 0;
+  const printableWidth = pageWidth - printMarginLeft - printMarginRight;
+  const printableHeight = pageHeight - printMarginTop - printMarginBottom;
   const gridWidth = columns * labelWidth + (columns - 1) * gapX;
   const gridHeight = rows * labelHeight + (rows - 1) * gapY;
-  const gridStartX = printMarginSide + (printableWidth - gridWidth) / 2 + printOffsetX;
-  const gridStartY = printMarginTop + printOffsetY;
+  const remainingX = printableWidth - gridWidth;
+  const remainingY = printableHeight - gridHeight;
+  const horizontalOffset = settings.gridAlignX === 'left' ? 0 : settings.gridAlignX === 'right' ? remainingX : remainingX / 2;
+  const verticalOffset = settings.gridAlignY === 'center' ? remainingY / 2 : settings.gridAlignY === 'bottom' ? remainingY : 0;
+  const gridStartX = printMarginLeft + horizontalOffset + printOffsetX;
+  const gridStartY = printMarginTop + verticalOffset + printOffsetY;
   const fitsWidth = valid && printableWidth > 0 && gridWidth <= printableWidth
-    && gridStartX >= printMarginSide - 0.001 && gridStartX + gridWidth <= pageWidth - printMarginSide + 0.001;
+    && gridStartX >= printMarginLeft - 0.001 && gridStartX + gridWidth <= pageWidth - printMarginRight + 0.001;
   const fitsHeight = valid && printableHeight > 0 && gridHeight <= printableHeight
-    && gridStartY >= printMarginTop - 0.001 && gridStartY + gridHeight <= pageHeight - printMarginTop + 0.001;
-  return { valid, fits: fitsWidth && fitsHeight, pageWidth, pageHeight, printableWidth, printableHeight, gridWidth, gridHeight, gridStartX, gridStartY, printMarginTop, printMarginSide, printOffsetX, printOffsetY, fitsWidth, fitsHeight, columns, rows, perPage: columns * rows };
+    && gridStartY >= printMarginTop - 0.001 && gridStartY + gridHeight <= pageHeight - printMarginBottom + 0.001;
+  return { valid, fits: fitsWidth && fitsHeight, pageWidth, pageHeight, printableWidth, printableHeight, gridWidth, gridHeight, gridStartX, gridStartY, printMarginTop, printMarginRight, printMarginBottom, printMarginLeft, printOffsetX, printOffsetY, fitsWidth, fitsHeight, columns, rows, perPage: columns * rows };
 }
 
 function readInitialProjectState() {
@@ -359,9 +375,9 @@ export default function App() {
     const pageJobs = [...queuedPrintJobs, ...(printRunJobs || [])];
     const namedPages = pageJobs.filter(job => job.design && job.metrics?.valid).map(job => {
       const pageName = 'label_sheet_' + String(job.id).replace(/[^a-zA-Z0-9_-]/g, '_');
-      return '@page ' + pageName + ' { size: ' + job.metrics.pageWidth + 'mm ' + job.metrics.pageHeight + 'mm; margin: ' + job.settings.printMarginTop + 'mm ' + job.settings.printMarginSide + 'mm; }';
+      return '@page ' + pageName + ' { size: ' + job.metrics.pageWidth + 'mm ' + job.metrics.pageHeight + 'mm; margin: ' + job.settings.printMarginTop + 'mm ' + job.settings.printMarginRight + 'mm ' + job.settings.printMarginBottom + 'mm ' + job.settings.printMarginLeft + 'mm; }';
     }).join(' ');
-    style.textContent = '@media print { @page { size: ' + w + 'mm ' + h + 'mm; margin: ' + Number(settings.printMarginTop || 0) + 'mm ' + Number(settings.printMarginSide || 0) + 'mm; } ' + namedPages + ' }';
+    style.textContent = '@media print { @page { size: ' + w + 'mm ' + h + 'mm; margin: ' + Number(settings.printMarginTop || 0) + 'mm ' + Number(settings.printMarginRight || 0) + 'mm ' + Number(settings.printMarginBottom || 0) + 'mm ' + Number(settings.printMarginLeft || 0) + 'mm; } ' + namedPages + ' }';
   }, [settings.pageSize, settings.orientation, settings.customPageWidth, settings.customPageHeight, settings.printMarginTop, settings.printMarginSide, queuedPrintJobs, printRunJobs]);
 
   useEffect(() => {
@@ -1157,6 +1173,9 @@ export default function App() {
     '--font-size': settings.fontSize + 'pt', '--line-gap': settings.lineGap + 'mm', '--rows': settings.rows,
     '--h-align': settings.alignment === 'left' ? 'flex-start' : settings.alignment === 'right' ? 'flex-end' : 'center',
     '--text-align': settings.alignment, '--v-align': settings.vertical === 'top' ? 'flex-start' : settings.vertical === 'bottom' ? 'flex-end' : 'center',
+    '--sheet-align-x': settings.gridAlignX === 'left' ? 'start' : settings.gridAlignX === 'right' ? 'end' : 'center',
+    '--sheet-align-y': settings.gridAlignY === 'top' ? 'start' : settings.gridAlignY === 'bottom' ? 'end' : 'center',
+    '--printable-height': pageMetrics.printableHeight + 'mm',
     '--print-offset-x': Number(settings.printOffsetX || 0) + 'mm', '--print-offset-y': Number(settings.printOffsetY || 0) + 'mm'
   };
 
@@ -1320,21 +1339,26 @@ export default function App() {
     <div className="print-calibration">
       <div className="print-calibration-heading"><strong>Print alignment & calibration</strong><span>Match your printer's printable area and compensate for small feed offsets. All measurements are in millimetres.</span></div>
       <div className="settings-grid calibration-grid">
-        <label>Vertical page margin — top & bottom (mm)<input type="number" min="0" max="40" step="0.1" value={settings.printMarginTop} onChange={e => setSetting('printMarginTop', Math.max(0, Number(e.target.value) || 0))}/></label>
-        <label>Horizontal page margin — left & right (mm)<input type="number" min="0" max="40" step="0.1" value={settings.printMarginSide} onChange={e => setSetting('printMarginSide', Math.max(0, Number(e.target.value) || 0))}/></label>
+        <label>Top margin (mm)<input type="number" min="0" max="40" step="0.1" value={settings.printMarginTop} onChange={e => setSetting('printMarginTop', Number(e.target.value))}/></label>
+        <label>Right margin (mm)<input type="number" min="0" max="40" step="0.1" value={settings.printMarginRight} onChange={e => setSetting('printMarginRight', Number(e.target.value))}/></label>
+        <label>Bottom margin (mm)<input type="number" min="0" max="40" step="0.1" value={settings.printMarginBottom} onChange={e => setSetting('printMarginBottom', Number(e.target.value))}/></label>
+        <label>Left margin (mm)<input type="number" min="0" max="40" step="0.1" value={settings.printMarginLeft} onChange={e => setSetting('printMarginLeft', Number(e.target.value))}/></label>
+        <label>Grid horizontal position<select value={settings.gridAlignX} onChange={e => setSetting('gridAlignX', e.target.value)}><option value="left">Left</option><option value="center">Center</option><option value="right">Right</option></select></label>
+        <label>Grid vertical position<select value={settings.gridAlignY} onChange={e => setSetting('gridAlignY', e.target.value)}><option value="top">Top</option><option value="center">Center</option><option value="bottom">Bottom</option></select></label>
         <label>Horizontal offset X (mm)<input type="number" step="0.1" value={settings.printOffsetX} onChange={e => setSetting('printOffsetX', Number(e.target.value) || 0)}/></label>
         <label>Vertical offset Y (mm)<input type="number" step="0.1" value={settings.printOffsetY} onChange={e => setSetting('printOffsetY', Number(e.target.value) || 0)}/></label>
       </div>
       <div className="calibration-actions">
         <button className="button outline" onClick={printCalibrationTest}>Print alignment test</button>
-        <button className="button secondary" onClick={() => { setSetting('printOffsetX', 0); setSetting('printOffsetY', 0); }}>Reset X/Y offsets</button>
+        <button className="button secondary" onClick={() => { setSetting('gridAlignX', 'center'); setSetting('gridAlignY', 'top'); setSetting('printOffsetX', 0); setSetting('printOffsetY', 0); }}>Reset grid position</button>
+        <button className="button secondary" onClick={() => { setSetting('printMarginTop', defaults.printMarginTop); setSetting('printMarginRight', defaults.printMarginRight); setSetting('printMarginBottom', defaults.printMarginBottom); setSetting('printMarginLeft', defaults.printMarginLeft); }}>Reset margins</button>
       </div>
     </div>
     <div className={'layout-fit ' + (pageMetrics.fits ? 'fit-ok' : 'fit-warning')} role="status">
       {pageMetrics.valid
         ? (pageMetrics.fits
           ? 'Label grid fits the selected page: ' + pageMetrics.gridWidth.toFixed(1) + ' × ' + pageMetrics.gridHeight.toFixed(1) + ' mm.'
-          : 'Label grid exceeds the printable page area (' + pageMetrics.printableWidth.toFixed(1) + ' × ' + pageMetrics.printableHeight.toFixed(1) + ' mm). Adjust rows, columns, label size or gaps.')
+          : 'Label grid exceeds the printable page area (' + pageMetrics.printableWidth.toFixed(1) + ' × ' + pageMetrics.printableHeight.toFixed(1) + ' mm). Adjust margins, grid position, rows, columns, label size or gaps.')
         : 'Enter valid page and label dimensions and non-negative gaps.'}
     </div><div className="settings-footer"><span><b>{perPage}</b> labels per page · <b>{pages.length}</b> page(s)</span><button className="text-button" onClick={resetSettings}><RotateCcw size={14}/> Reset settings</button></div></section></div>
 
@@ -1444,6 +1468,9 @@ export default function App() {
               '--h-align': cfg.alignment === 'left' ? 'flex-start' : cfg.alignment === 'right' ? 'flex-end' : 'center',
               '--text-align': cfg.alignment,
               '--v-align': cfg.vertical === 'top' ? 'flex-start' : cfg.vertical === 'bottom' ? 'flex-end' : 'center',
+              '--sheet-align-x': cfg.gridAlignX === 'left' ? 'start' : cfg.gridAlignX === 'right' ? 'end' : 'center',
+              '--sheet-align-y': cfg.gridAlignY === 'top' ? 'start' : cfg.gridAlignY === 'bottom' ? 'end' : 'center',
+              '--printable-height': metrics.printableHeight + 'mm',
               '--print-offset-x': cfg.printOffsetX + 'mm', '--print-offset-y': cfg.printOffsetY + 'mm'
             };
             return <div className="print-page mixed-print-page" key={sheet.id} style={printVars}>
