@@ -76,6 +76,29 @@ function BarcodeVisual({ value, format = 'CODE128', foreground = '#111111', back
   </div>;
 }
 
+function normalizeSettings(value = {}) {
+  const merged = { ...defaults, ...(value && typeof value === 'object' ? value : {}) };
+  const ranges = {
+    customPageWidth: [50, 2000], customPageHeight: [50, 2000],
+    labelWidth: [5, 1000], labelHeight: [5, 1000],
+    columns: [1, 8], rows: [1, 30], gapX: [0, 100], gapY: [0, 100],
+    padding: [0, 20], fontSize: [5, 36], lineGap: [0, 20],
+    printMarginTop: [0, 40], printMarginSide: [0, 40],
+    printOffsetX: [-40, 40], printOffsetY: [-40, 40]
+  };
+  for (const [key, [min, max]] of Object.entries(ranges)) {
+    const number = Number(merged[key]);
+    merged[key] = Number.isFinite(number) ? Math.min(max, Math.max(min, number)) : defaults[key];
+  }
+  if (!['A3', 'A4', 'A5', 'Letter', 'Legal', 'Custom'].includes(merged.pageSize)) merged.pageSize = defaults.pageSize;
+  if (!['portrait', 'landscape'].includes(merged.orientation)) merged.orientation = defaults.orientation;
+  if (!['left', 'center', 'right'].includes(merged.alignment)) merged.alignment = defaults.alignment;
+  if (!['top', 'center', 'bottom'].includes(merged.vertical)) merged.vertical = defaults.vertical;
+  merged.columns = Math.round(merged.columns);
+  merged.rows = Math.round(merged.rows);
+  return merged;
+}
+
 function readInitialProjectState() {
   const fallbackPage = { id: 'design-1', name: 'Design 1', visualElements: [], labelBackground: '', settings: defaults, visualLayout: true };
   const numberOr = (value, fallback) => Number.isFinite(Number(value)) ? Number(value) : fallback;
@@ -101,7 +124,7 @@ function readInitialProjectState() {
           height: Math.max(1, numberOr(element.height, 6))
         })) : [],
         labelBackground: typeof page.labelBackground === 'string' ? page.labelBackground : '',
-        settings: { ...defaults, ...(page.settings && typeof page.settings === 'object' ? page.settings : {}) },
+        settings: normalizeSettings(page.settings),
         visualLayout: page.visualLayout == null ? Boolean(page.visualElements?.length) : Boolean(page.visualLayout)
       }));
     }
@@ -119,7 +142,7 @@ function readInitialProjectState() {
     pages,
     activePage,
     templates,
-    settings: { ...defaults, ...(activePage.settings || storedSettings) },
+    settings: normalizeSettings(activePage.settings || storedSettings),
     visualElements: activePage.visualElements || [],
     labelBackground: activePage.labelBackground || '',
     visualLayout: Boolean(activePage.visualLayout),
@@ -137,7 +160,7 @@ export default function App() {
   const [fields, setFields] = useState([]);
   const [lines, setLines] = useState([]);
   const [customLayout, setCustomLayout] = useState(false);
-  const [settings, setSettings] = useState(() => initialProject.settings);
+  const [settings, setSettings] = useState(() => normalizeSettings(initialProject.settings));
   const [fileName, setFileName] = useState('');
   const [status, setStatus] = useState({ type: 'info', text: 'Upload an Excel/CSV file or load sample data to begin.' });
   const [showAll, setShowAll] = useState(false);
@@ -166,7 +189,7 @@ export default function App() {
   const fileRef = useRef(null);
   const workbookRef = useRef(null);
   const enabledFields = fields.filter(field => field.enabled);
-  const perPage = Math.max(1, Number(settings.columns) * Number(settings.rows));
+  const perPage = Math.max(1, Math.round(Number(settings.columns) || 1) * Math.round(Number(settings.rows) || 1));
   const pages = useMemo(() => { const out = []; for (let i = 0; i < records.length; i += perPage) out.push(records.slice(i, i + perPage)); return out; }, [records, perPage]);
   const pageMetrics = useMemo(() => {
     const presets = { A3: [297, 420], A4: [210, 297], A5: [148, 210], Letter: [215.9, 279.4], Legal: [215.9, 355.6] };
@@ -210,7 +233,7 @@ export default function App() {
     : customLayout
       ? lines.some(line => String(line.text ?? '').trim())
       : enabledFields.length > 0;
-  const setSetting = (key, value) => setSettings(old => ({ ...old, [key]: value }));
+  const setSetting = (key, value) => setSettings(old => normalizeSettings({ ...old, [key]: value }));
   const selectedRecords = useMemo(() => records.filter((_, index) => selectedIndexes.includes(index)), [records, selectedIndexes]);
   const printSource = printSelectionOnly ? selectedRecords : records;
   const printPages = useMemo(() => {
@@ -243,7 +266,7 @@ export default function App() {
   }, [designPages, activeDesignPageId]);
   useEffect(() => {
     setDesignPages(old => old.map(page => page.id === activeDesignPageId
-      ? { ...page, name: designPageName, visualElements, labelBackground, settings, visualLayout }
+      ? { ...page, name: designPageName, visualElements, labelBackground, settings: normalizeSettings(settings), visualLayout }
       : page));
   }, [visualElements, labelBackground, settings, visualLayout, activeDesignPageId, designPageName]);
 
@@ -506,12 +529,12 @@ export default function App() {
     setDesignPages(pages);
     setActiveDesignPageId(id); setDesignPageName(target.name);
     setVisualElements(target.visualElements || []); setLabelBackground(target.labelBackground || '');
-    setSettings({ ...defaults, ...(target.settings || {}) }); setVisualLayout(Boolean(target.visualLayout));
+    setSettings(normalizeSettings(target.settings)); setVisualLayout(Boolean(target.visualLayout));
     setSelectedVisualId(target.visualElements?.[0]?.id || ''); setVisualDrag(null);
   }
   function addDesignPage() {
     const pages = saveCurrentDesignPage(), id = 'design-' + Date.now();
-    const page = { id, name:'Design ' + (pages.length+1), visualElements:[], labelBackground:'', settings:{...settings}, visualLayout:true };
+    const page = { id, name:'Design ' + (pages.length+1), visualElements:[], labelBackground:'', settings:normalizeSettings(settings), visualLayout:true };
     setDesignPages([...pages,page]);
     setActiveDesignPageId(id); setDesignPageName(page.name);
     setVisualElements([]); setLabelBackground(''); setVisualLayout(true); setSelectedVisualId('');
@@ -524,7 +547,7 @@ export default function App() {
     const copy={...current,id,name:current.name+' copy',visualElements:(current.visualElements || []).map((element,index)=>({...element,id:id+'-el-'+index}))};
     setDesignPages([...pages,copy]);
     setActiveDesignPageId(id); setDesignPageName(copy.name); setVisualElements(copy.visualElements);
-    setLabelBackground(copy.labelBackground||''); setSettings({...defaults,...(copy.settings||{})});
+    setLabelBackground(copy.labelBackground||''); setSettings(normalizeSettings(copy.settings));
     setVisualLayout(Boolean(copy.visualLayout)); setSelectedVisualId(copy.visualElements[0]?.id||'');
     setStatus({type:'success',text:'Design page duplicated.'});
   }
@@ -534,7 +557,7 @@ export default function App() {
     const remaining=pages.filter(page=>page.id!==activeDesignPageId), target=remaining[Math.max(0,index-1)]||remaining[0];
     setDesignPages(remaining);
     setActiveDesignPageId(target.id); setDesignPageName(target.name); setVisualElements(target.visualElements||[]);
-    setLabelBackground(target.labelBackground||''); setSettings({...defaults,...(target.settings||{})});
+    setLabelBackground(target.labelBackground||''); setSettings(normalizeSettings(target.settings));
     setVisualLayout(Boolean(target.visualLayout)); setSelectedVisualId(target.visualElements?.[0]?.id||'');
   }
   function applyStarterTemplate(kind) {
@@ -608,7 +631,8 @@ export default function App() {
     return <div className="label">{getLabelLines(record).map(line=><div className={'label-line'+(line.bold?' bold':'')} key={line.id}>{line.text}</div>)}</div>;
   }
   function validateForOutput(source) {
-    if (!source.length) { setStatus({ type: 'error', text: 'No records are selected for this action.' }); return false; }
+    if (!Array.isArray(source) || !source.length) { setStatus({ type: 'error', text: 'No records are selected for this action.' }); return false; }
+    if (!Number.isInteger(perPage) || perPage < 1) { setStatus({ type: 'error', text: 'The rows and columns configuration is invalid. Reset the sheet layout and try again.' }); return false; }
     if (!hasLabelContent) { setStatus({ type: 'error', text: 'Add at least one visual element, select a field, or enter a label line.' }); return false; }
     if (!pageMetrics.valid) { setStatus({ type: 'error', text: 'Enter valid positive page and label dimensions, and non-negative gaps.' }); return false; }
     if (!pageMetrics.fits) { setStatus({ type: 'error', text: 'The label grid (' + pageMetrics.gridWidth.toFixed(1) + ' × ' + pageMetrics.gridHeight.toFixed(1) + ' mm) exceeds the printable area (' + pageMetrics.printableWidth.toFixed(1) + ' × ' + pageMetrics.printableHeight.toFixed(1) + ' mm). Reduce the label size, rows, columns or gaps before printing.' }); return false; }
@@ -787,7 +811,7 @@ export default function App() {
     }
   }
   function toggleRecord(index) {
-    setSelectedIndexes(old => old.includes(index) ? old.filter(value => value !== index) : [...old, index]);
+    setSelectedIndexes(old => old.includes(index) ? old.filter(value => value !== index) : [...old, index].sort((a, b) => a - b));
   }
   function selectAllRecords() { setSelectedIndexes(records.map((_, index) => index)); }
   function clearSelectedRecords() { setSelectedIndexes([]); }
@@ -821,12 +845,12 @@ export default function App() {
       setDesignPages(template.designPages);
       setActiveDesignPageId(active.id);setDesignPageName(active.name||'Design 1');
       setVisualElements(active.visualElements||[]);setLabelBackground(active.labelBackground||'');
-      setSettings({...defaults,...(active.settings || template.settings || {})});setVisualLayout(Boolean(active.visualLayout));
+      setSettings(normalizeSettings(active.settings || template.settings));setVisualLayout(Boolean(active.visualLayout));
     } else {
       setDesignPages([{id:'design-1',name:'Design 1',visualElements:template.visualElements||[],labelBackground:template.labelBackground||'',settings:{...defaults,...template.settings},visualLayout:Boolean(template.visualLayout)}]);
       setActiveDesignPageId('design-1');setDesignPageName('Design 1');
     }
-    if (!template.designPages?.length) setSettings({ ...defaults, ...(template.settings || {}) });
+    if (!template.designPages?.length) setSettings(normalizeSettings(template.settings));
     setTemplateName(template.name);
     setStatus({ type: 'success', text: 'Template "' + template.name + '" applied.' });
   }
@@ -837,7 +861,7 @@ export default function App() {
     setSelectedTemplateId('');
     setStatus({ type: 'info', text: 'Template "' + (template?.name || '') + '" deleted.' });
   }
-  function resetSettings() { setSettings(defaults); setStatus({ type: 'info', text: 'Page and label settings reset to defaults.' }); }
+  function resetSettings() { setSettings(normalizeSettings(defaults)); setStatus({ type: 'info', text: 'Page and label settings reset to defaults.' }); }
 
   const vars = {
     '--label-width': settings.labelWidth + 'mm', '--label-height': settings.labelHeight + 'mm', '--columns': settings.columns,
