@@ -378,7 +378,7 @@ export default function App() {
       return '@page ' + pageName + ' { size: ' + job.metrics.pageWidth + 'mm ' + job.metrics.pageHeight + 'mm; margin: ' + job.settings.printMarginTop + 'mm ' + job.settings.printMarginRight + 'mm ' + job.settings.printMarginBottom + 'mm ' + job.settings.printMarginLeft + 'mm; }';
     }).join(' ');
     style.textContent = '@media print { @page { size: ' + w + 'mm ' + h + 'mm; margin: ' + Number(settings.printMarginTop || 0) + 'mm ' + Number(settings.printMarginRight || 0) + 'mm ' + Number(settings.printMarginBottom || 0) + 'mm ' + Number(settings.printMarginLeft || 0) + 'mm; } ' + namedPages + ' }';
-  }, [settings.pageSize, settings.orientation, settings.customPageWidth, settings.customPageHeight, settings.printMarginTop, settings.printMarginSide, queuedPrintJobs, printRunJobs]);
+  }, [settings.pageSize, settings.orientation, settings.customPageWidth, settings.customPageHeight, settings.printMarginTop, settings.printMarginRight, settings.printMarginBottom, settings.printMarginLeft, queuedPrintJobs, printRunJobs]);
 
   useEffect(() => {
     if (!printRunJobs?.length || !printSheets.length) return undefined;
