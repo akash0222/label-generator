@@ -18,7 +18,7 @@ npm run preview
 
 ## Features
 
-- Upload `.xlsx`, `.xls`, or `.csv` files and automatically detect a header row.
+- Upload `.xlsx`, `.xls`, or `.csv` files (up to 20 MB) and automatically detect a header row.
 - Select Excel columns for simple labels.
 - Compose custom label lines from multiple Excel columns and fixed text.
 - Reorder, bold, add, and remove custom lines.
@@ -26,7 +26,8 @@ npm run preview
 - Configure A3, A4, A5, Letter, Legal, or custom page width and height.
 - Choose portrait or landscape orientation.
 - Configure label dimensions, rows, columns, gaps, alignment, font size, and padding.
-- Live preview and multi-page printing.
+- Live preview, printable-area validation, and multi-page printing.
+- Spreadsheet parser pinned to the patched SheetJS 0.20.3 distribution.
 
 ## Example address label
 
