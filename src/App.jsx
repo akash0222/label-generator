@@ -311,6 +311,15 @@ export default function App() {
         : (design.fields || []).some(field => field.enabled);
     return { ...item, design, settings: designSettings, metrics, name: design.name, records: sourceRecords, copies, content, sheetCount: Math.ceil(sourceRecords.length / metrics.perPage) * copies };
   }), [printQueue, currentDesignPages, records, selectedRecords, hasLabelContent]);
+  const readyPrintJobs = queuedPrintJobs.filter(job => !job.missing && job.metrics?.valid && job.metrics?.fits && job.content && job.records.length > 0);
+  const attentionPrintJobs = queuedPrintJobs.length - readyPrintJobs.length;
+  const productionLabels = queuedPrintJobs.length
+    ? queuedPrintJobs.reduce((sum, job) => sum + job.records.length * job.copies, 0)
+    : records.length;
+  const productionSheets = queuedPrintJobs.length
+    ? queuedPrintJobs.reduce((sum, job) => sum + (job.sheetCount || 0), 0)
+    : Math.ceil(records.length / perPage);
+  const currentDesignReady = records.length > 0 && hasLabelContent && pageMetrics.valid && pageMetrics.fits;
   const printSheets = useMemo(() => {
     if (!printRunJobs?.length) return [];
     const output = [];
@@ -1187,6 +1196,54 @@ export default function App() {
       <div className="summary-card"><span>Active design</span><strong>{designPageName || 'Untitled design'}</strong><small>{designPages.length} design page{designPages.length === 1 ? '' : 's'} in this project</small></div>
       <div className="summary-card"><span>Sheet setup</span><strong>{settings.pageSize} · {settings.orientation}</strong><small>{settings.columns} columns × {settings.rows} rows</small></div>
       <div className="summary-card"><span>Labels per sheet</span><strong>{perPage}</strong><small>{settings.labelWidth} × {settings.labelHeight} mm label size</small></div>
+    </section>
+
+    <section className="production-dashboard" aria-labelledby="production-dashboard-title">
+      <div className="production-dashboard-heading">
+        <div>
+          <span className="production-eyebrow">LIVE WORKSPACE OVERVIEW</span>
+          <h2 id="production-dashboard-title">Production Dashboard</h2>
+          <p>Track the current label run, review readiness and jump directly to each production stage.</p>
+        </div>
+        <div className="production-dashboard-actions">
+          <button type="button" className="button outline" onClick={() => document.getElementById('print-queue')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>Review print batch</button>
+          <button type="button" className="button primary" onClick={() => printQueue.length ? printQueuedDesigns() : printLabels('all')} disabled={printQueue.length ? !queuedPrintJobs.length || attentionPrintJobs > 0 : !currentDesignReady}><Printer size={15}/> {printQueue.length ? 'Print batch' : 'Print current design'}</button>
+        </div>
+      </div>
+      <div className="production-kpi-grid" aria-label="Production statistics">
+        <div className="production-kpi"><span>Source records</span><strong>{records.length.toLocaleString()}</strong><small>{fileName || 'No spreadsheet loaded'}</small></div>
+        <div className="production-kpi"><span>Planned labels</span><strong>{productionLabels.toLocaleString()}</strong><small>{queuedPrintJobs.length ? 'Includes batch copies' : 'Current worksheet records'}</small></div>
+        <div className="production-kpi"><span>Estimated sheets</span><strong>{productionSheets.toLocaleString()}</strong><small>{queuedPrintJobs.length ? 'Across queued designs' : 'Based on current sheet setup'}</small></div>
+        <div className="production-kpi"><span>Print queue</span><strong>{queuedPrintJobs.length ? readyPrintJobs.length + ' / ' + queuedPrintJobs.length : '—'}</strong><small>{queuedPrintJobs.length ? (attentionPrintJobs ? attentionPrintJobs + ' need attention' : 'All jobs ready') : 'No mixed batch queued'}</small></div>
+      </div>
+      <div className="production-checks">
+        <div className="production-check-heading"><strong>Production readiness</strong><span>{designPages.length} design page{designPages.length === 1 ? '' : 's'} · {settings.pageSize} {settings.orientation}</span></div>
+        <div className="production-check-grid">
+          <div className={'production-check ' + (records.length ? 'is-ready' : 'is-waiting')}>
+            <span className="production-check-indicator">{records.length ? <Check size={13}/> : '01'}</span>
+            <div><strong>Source data</strong><small>{records.length ? records.length.toLocaleString() + ' records loaded' : 'Upload an Excel or CSV file'}</small></div>
+          </div>
+          <div className={'production-check ' + (hasLabelContent ? 'is-ready' : 'is-waiting')}>
+            <span className="production-check-indicator">{hasLabelContent ? <Check size={13}/> : '02'}</span>
+            <div><strong>Label design</strong><small>{hasLabelContent ? (visualLayout ? 'Visual layout configured' : customLayout ? 'Custom lines configured' : enabledFields.length + ' fields selected') : 'Add fields or label content'}</small></div>
+          </div>
+          <div className={'production-check ' + (pageMetrics.valid && pageMetrics.fits ? 'is-ready' : 'is-warning')}>
+            <span className="production-check-indicator">{pageMetrics.valid && pageMetrics.fits ? <Check size={13}/> : <AlertCircle size={13}/>}</span>
+            <div><strong>Sheet layout</strong><small>{pageMetrics.valid && pageMetrics.fits ? pageMetrics.perPage + ' labels fit per sheet' : 'Review dimensions and margins'}</small></div>
+          </div>
+          <div className={'production-check ' + (queuedPrintJobs.length && !attentionPrintJobs ? 'is-ready' : queuedPrintJobs.length ? 'is-warning' : 'is-neutral')}>
+            <span className="production-check-indicator">{queuedPrintJobs.length && !attentionPrintJobs ? <Check size={13}/> : queuedPrintJobs.length ? <AlertCircle size={13}/> : '04'}</span>
+            <div><strong>Print batch</strong><small>{queuedPrintJobs.length ? (attentionPrintJobs ? attentionPrintJobs + ' job(s) need attention' : 'All ' + queuedPrintJobs.length + ' jobs are ready') : 'Optional — use the current design or build a batch'}</small></div>
+          </div>
+        </div>
+      </div>
+      <div className="production-shortcuts" aria-label="Production shortcuts">
+        <button type="button" onClick={() => document.getElementById('step-data')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}><span>01</span>Import data <span className="shortcut-arrow">→</span></button>
+        <button type="button" onClick={() => document.getElementById('step-design')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}><span>02</span>Design labels <span className="shortcut-arrow">→</span></button>
+        <button type="button" onClick={() => document.getElementById('step-print-layout')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}><span>03</span>Configure sheets <span className="shortcut-arrow">→</span></button>
+        <button type="button" onClick={() => document.getElementById('print-queue')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}><span>04</span>Manage batch <span className="shortcut-arrow">→</span></button>
+      </div>
+      <p className="production-footnote">Figures are calculated from the data and print queue currently loaded in this browser. Historical print counts are not recorded.</p>
     </section>
 
     <nav className="workflow-nav" aria-label="Label production workflow">
