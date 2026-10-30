@@ -11,6 +11,71 @@ const defaults = { pageSize: 'A4', orientation: 'portrait', customPageWidth: 210
 const norm = value => String(value ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
 const getValue = (record, heading) => { const key = Object.keys(record).find(item => norm(item) === norm(heading)); return key ? String(record[key] ?? '').trim() : ''; };
 
+
+function QrCodeVisual({ value, foreground = '#111111', background = '#ffffff' }) {
+  const [src, setSrc] = useState('');
+  const [error, setError] = useState('');
+  useEffect(() => {
+    let active = true;
+    setSrc(''); setError('');
+    if (!value) return () => { active = false; };
+    (async () => {
+      try {
+        const module = await import('qrcode');
+        const QRCode = module.default || module;
+        const dataUrl = await QRCode.toDataURL(value, {
+          width: 320,
+          margin: 1,
+          errorCorrectionLevel: 'M',
+          color: {
+            dark: foreground.length === 7 ? foreground + 'FF' : '#111111FF',
+            light: background.length === 7 ? background + 'FF' : '#FFFFFFFF'
+          }
+        });
+        if (active) setSrc(dataUrl);
+      } catch (err) {
+        if (active) setError(err.message || 'QR code could not be generated.');
+      }
+    })();
+    return () => { active = false; };
+  }, [value, foreground, background]);
+  if (error) return <span className="code-error" title={error}>QR error</span>;
+  return src ? <img className="generated-code qr-image" src={src} alt="QR code" draggable="false"/> : <span className="code-loading">QR…</span>;
+}
+
+function BarcodeVisual({ value, format = 'CODE128', foreground = '#111111', background = '#ffffff', displayValue = true }) {
+  const svgRef = useRef(null);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    let active = true;
+    setError('');
+    if (!value || !svgRef.current) return () => { active = false; };
+    (async () => {
+      try {
+        const module = await import('jsbarcode');
+        const JsBarcode = module.default || module;
+        if (!active || !svgRef.current) return;
+        JsBarcode(svgRef.current, value, {
+          format: format || 'CODE128',
+          lineColor: foreground || '#111111',
+          background: background === 'transparent' ? '#ffffff' : (background || '#ffffff'),
+          width: 1.5,
+          height: 48,
+          displayValue,
+          fontSize: 11,
+          margin: 2
+        });
+      } catch (err) {
+        if (active) setError(err.message || 'Barcode value or format is invalid.');
+      }
+    })();
+    return () => { active = false; };
+  }, [value, format, foreground, background, displayValue]);
+  return <div className="barcode-visual">
+    {error ? <span className="code-error" title={error}>Barcode error</span> : <svg ref={svgRef} className="generated-code barcode-svg" role="img" aria-label="Barcode"/>}
+  </div>;
+}
+
 export default function App() {
   const [records, setRecords] = useState([]);
   const [headers, setHeaders] = useState([]);
@@ -42,6 +107,8 @@ export default function App() {
   const [selectedVisualId, setSelectedVisualId] = useState('');
   const [visualDrag, setVisualDrag] = useState(null);
   const [newVisualField, setNewVisualField] = useState('');
+  const [labelBackground, setLabelBackground] = useState('');
+  const backgroundInputRef = useRef(null);
   const fileRef = useRef(null);
   const workbookRef = useRef(null);
   const enabledFields = fields.filter(field => field.enabled);
@@ -224,18 +291,30 @@ export default function App() {
       ? lines.map(line => ({ id: line.id, text: renderLine(line.text, record), bold: line.bold })).filter(line => line.text)
       : enabledFields.map(field => ({ id: field.id, text: (field.prefix || '') + (getValue(record, field.label) || '') + (field.suffix || ''), bold: field.bold })).filter(line => line.text);
   }
-  function createVisualElement(text, bold = false) {
+  function createVisualElement(text, type = 'text') {
     const index = visualElements.length;
+    const isCode = type === 'qr' || type === 'barcode';
+    const width = type === 'qr' ? 22 : type === 'barcode' ? 52 : Math.max(10, Number(settings.labelWidth) - 6);
+    const height = type === 'qr' ? 22 : type === 'barcode' ? 15 : 6;
     const element = {
       id: 've-' + Date.now() + '-' + index,
+      type,
       text,
       x: 3,
-      y: Math.min(3 + index * 6, Math.max(0, Number(settings.labelHeight) - 7)),
-      width: Math.max(10, Number(settings.labelWidth) - 6),
-      height: 5,
+      y: Math.min(3 + index * 7, Math.max(0, Number(settings.labelHeight) - height)),
+      width: Math.min(width, Math.max(10, Number(settings.labelWidth) - 6)),
+      height,
       fontSize: Number(settings.fontSize) || 11,
-      bold,
-      align: 'left'
+      fontFamily: 'Arial',
+      color: '#111111',
+      backgroundColor: '#ffffff',
+      borderColor: '#333333',
+      borderWidth: 0,
+      borderRadius: 0,
+      bold: !isCode,
+      align: 'left',
+      barcodeFormat: 'CODE128',
+      displayValue: true
     };
     setVisualElements(old => [...old, element]);
     setSelectedVisualId(element.id);
@@ -246,17 +325,63 @@ export default function App() {
       const source = customLayout && lines.length ? lines : enabledFields;
       const next = source.map((item, index) => ({
         id: 've-' + Date.now() + '-' + index,
+        type: 'text',
         text: customLayout ? item.text : '{@' + item.label + '}',
         x: 3,
-        y: Math.min(3 + index * 6, Math.max(0, Number(settings.labelHeight) - 7)),
+        y: Math.min(3 + index * 7, Math.max(0, Number(settings.labelHeight) - 6)),
         width: Math.max(10, Number(settings.labelWidth) - 6),
-        height: 5,
+        height: 6,
         fontSize: Number(settings.fontSize) || 11,
+        fontFamily: 'Arial',
+        color: '#111111',
+        backgroundColor: 'transparent',
+        borderColor: '#333333',
+        borderWidth: 0,
+        borderRadius: 0,
         bold: Boolean(item.bold),
-        align: 'left'
+        align: 'left',
+        barcodeFormat: 'CODE128',
+        displayValue: true
       }));
       setVisualElements(next);
       setSelectedVisualId(next[0]?.id || '');
+    }
+  }
+  async function handleLabelBackground(file) {
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      setStatus({ type: 'error', text: 'Choose an image file for the label background.' });
+      return;
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      setStatus({ type: 'error', text: 'Background image must be 8 MB or smaller.' });
+      return;
+    }
+    try {
+      const source = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(new Error('Could not read the image file.'));
+        reader.readAsDataURL(file);
+      });
+      const image = await new Promise((resolve, reject) => {
+        const element = new Image();
+        element.onload = () => resolve(element);
+        element.onerror = () => reject(new Error('Unsupported or damaged image file.'));
+        element.src = source;
+      });
+      const scale = Math.min(1, 1400 / Math.max(image.naturalWidth, image.naturalHeight));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+      canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+      const context = canvas.getContext('2d');
+      context.fillStyle = '#ffffff';
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      context.drawImage(image, 0, 0, canvas.width, canvas.height);
+      setLabelBackground(canvas.toDataURL('image/jpeg', 0.82));
+      setStatus({ type: 'success', text: 'Label background image added and optimized.' });
+    } catch (error) {
+      setStatus({ type: 'error', text: error.message || 'Could not process the background image.' });
     }
   }
   function updateVisualElement(id, patch) {
@@ -273,40 +398,81 @@ export default function App() {
     if (!rect.width || !rect.height) return;
     const dx = (event.clientX - visualDrag.startClientX) / rect.width * Number(settings.labelWidth);
     const dy = (event.clientY - visualDrag.startClientY) / rect.height * Number(settings.labelHeight);
-    const x = Math.max(0, Math.min(Number(settings.labelWidth) - Number(element.width), visualDrag.startX + dx));
-    const y = Math.max(0, Math.min(Number(settings.labelHeight) - Number(element.height), visualDrag.startY + dy));
-    updateVisualElement(element.id, { x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10 });
+    if (visualDrag.mode === 'resize') {
+      const width = Math.max(5, Math.min(Number(settings.labelWidth) - Number(element.x), visualDrag.startWidth + dx));
+      const height = Math.max(4, Math.min(Number(settings.labelHeight) - Number(element.y), visualDrag.startHeight + dy));
+      updateVisualElement(element.id, { width: Math.round(width * 10) / 10, height: Math.round(height * 10) / 10 });
+    } else {
+      const x = Math.max(0, Math.min(Number(settings.labelWidth) - Number(element.width), visualDrag.startX + dx));
+      const y = Math.max(0, Math.min(Number(settings.labelHeight) - Number(element.height), visualDrag.startY + dy));
+      updateVisualElement(element.id, { x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10 });
+    }
   }
   function renderLabel(record, editing = false) {
     if (visualLayout) {
       return <div className="label visual-label">
+        {labelBackground && <img className="label-background" src={labelBackground} alt="" draggable="false"/>}
         {visualElements.map(element => {
           const text = renderLine(element.text, record);
           if (!text) return null;
+          const isSelected = editing && selectedVisualId === element.id;
+          const elementStyle = {
+            left: element.x + 'mm',
+            top: element.y + 'mm',
+            width: element.width + 'mm',
+            height: element.height + 'mm',
+            fontSize: (Number(element.fontSize) || 11) + 'pt',
+            fontFamily: element.fontFamily || 'Arial',
+            fontWeight: element.bold ? 700 : 400,
+            color: element.color || '#111111',
+            backgroundColor: element.backgroundColor || 'transparent',
+            borderColor: element.borderColor || '#333333',
+            borderWidth: Number(element.borderWidth || 0) + 'mm',
+            borderStyle: 'solid',
+            borderRadius: Number(element.borderRadius || 0) + 'mm',
+            textAlign: element.align || 'left',
+            justifyContent: element.align === 'center' ? 'center' : element.align === 'right' ? 'flex-end' : 'flex-start'
+          };
+          const moveStart = event => {
+            event.preventDefault();
+            event.currentTarget.setPointerCapture(event.pointerId);
+            setSelectedVisualId(element.id);
+            setVisualDrag({ id: element.id, mode: 'move', startClientX: event.clientX, startClientY: event.clientY, startX: Number(element.x), startY: Number(element.y) });
+          };
+          const content = element.type === 'qr'
+            ? <QrCodeVisual value={text} foreground={element.color} background={element.backgroundColor}/>
+            : element.type === 'barcode'
+              ? <BarcodeVisual value={text} format={element.barcodeFormat} foreground={element.color} background={element.backgroundColor} displayValue={element.displayValue !== false}/>
+              : <span className="visual-text-content">{text}</span>;
           return <div
             key={element.id}
-            className={'visual-element' + (editing && selectedVisualId === element.id ? ' is-selected' : '')}
-            style={{
-              left: element.x + 'mm',
-              top: element.y + 'mm',
-              width: element.width + 'mm',
-              height: element.height + 'mm',
-              fontSize: (Number(element.fontSize) || 11) + 'pt',
-              fontWeight: element.bold ? 700 : 400,
-              textAlign: element.align || 'left',
-              justifyContent: element.align === 'center' ? 'center' : element.align === 'right' ? 'flex-end' : 'flex-start'
-            }}
-            onPointerDown={editing ? event => {
-              event.preventDefault();
-              event.currentTarget.setPointerCapture(event.pointerId);
-              setSelectedVisualId(element.id);
-              setVisualDrag({ id: element.id, startClientX: event.clientX, startClientY: event.clientY, startX: Number(element.x), startY: Number(element.y) });
-            } : undefined}
+            className={'visual-element ' + (element.type || 'text') + (isSelected ? ' is-selected' : '')}
+            style={elementStyle}
+            onPointerDown={editing ? moveStart : undefined}
             onPointerMove={editing ? event => moveVisualElement(event, element) : undefined}
             onPointerUp={editing ? () => setVisualDrag(null) : undefined}
             onPointerCancel={editing ? () => setVisualDrag(null) : undefined}
-            title={editing ? 'Drag to position this element' : undefined}
-          >{text}</div>;
+            title={editing ? 'Drag to move. Use the bottom-right handle to resize.' : undefined}
+          >
+            {content}
+            {isSelected && <span
+              className="resize-handle"
+              role="button"
+              aria-label="Resize selected element"
+              title="Drag to resize"
+              onPointerDown={event => {
+                event.preventDefault();
+                event.stopPropagation();
+                event.currentTarget.parentElement.setPointerCapture(event.pointerId);
+                setVisualDrag({
+                  id: element.id, mode: 'resize',
+                  startClientX: event.clientX, startClientY: event.clientY,
+                  startX: Number(element.x), startY: Number(element.y),
+                  startWidth: Number(element.width), startHeight: Number(element.height)
+                });
+              }}
+            />}
+          </div>;
         })}
       </div>;
     }
@@ -368,31 +534,75 @@ export default function App() {
       const fontHeight = fontSize * 0.3528;
       const lineHeight = fontHeight * 1.25;
       const contentWidth = Math.max(5, labelWidth - 2 * padding);
-      source.forEach((record, index) => {
+      const pdfFont = family => /times/i.test(family || '') ? 'times' : /courier/i.test(family || '') ? 'courier' : 'helvetica';
+      const hexColor = value => /^#[0-9a-f]{6}$/i.test(value || '') ? value : '#111111';
+      const { default: JsBarcode } = await import('jsbarcode');
+      const { default: QRCode } = await import('qrcode');
+
+      for (let index = 0; index < source.length; index += 1) {
+        const record = source[index];
         const pagePosition = index % perPage;
         if (index > 0 && pagePosition === 0) doc.addPage([pageWidth, pageHeight], orientation);
         const column = pagePosition % columns;
         const row = Math.floor(pagePosition / columns);
         const x = startX + column * (labelWidth + gapX);
         const y = startY + row * (labelHeight + gapY);
+
         if (visualLayout) {
-          visualElements.forEach(element => {
+          if (labelBackground) doc.addImage(labelBackground, 'JPEG', x, y, labelWidth, labelHeight);
+          for (const element of visualElements) {
             const text = renderLine(element.text, record);
-            if (!text) return;
-            const elementFont = Number(element.fontSize) || fontSize;
-            const elementWidth = Math.max(2, Number(element.width) - 1);
-            const wrapped = doc.splitTextToSize(text, elementWidth);
-            const elementAlign = element.align || 'left';
-            const textX = x + Number(element.x) + (elementAlign === 'center' ? Number(element.width) / 2 : elementAlign === 'right' ? Number(element.width) : 0);
-            const lineHeightForElement = elementFont * 0.3528 * 1.2;
-            let elementY = y + Number(element.y) + elementFont * 0.3528;
-            doc.setFont('helvetica', element.bold ? 'bold' : 'normal');
-            doc.setFontSize(elementFont);
-            wrapped.forEach(part => {
-              doc.text(part, textX, elementY, { align: elementAlign });
-              elementY += lineHeightForElement;
-            });
-          });
+            if (!text) continue;
+            const ex = x + Number(element.x);
+            const ey = y + Number(element.y);
+            const ew = Number(element.width);
+            const eh = Number(element.height);
+            const fill = element.backgroundColor && element.backgroundColor !== 'transparent';
+            const bordered = Number(element.borderWidth) > 0;
+            if (fill || bordered) {
+              if (fill) doc.setFillColor(hexColor(element.backgroundColor));
+              if (bordered) {
+                doc.setDrawColor(hexColor(element.borderColor));
+                doc.setLineWidth(Number(element.borderWidth));
+              }
+              if (fill && bordered) doc.roundedRect(ex, ey, ew, eh, Number(element.borderRadius || 0), Number(element.borderRadius || 0), 'FD');
+              else if (fill) doc.rect(ex, ey, ew, eh, 'F');
+              else doc.roundedRect(ex, ey, ew, eh, Number(element.borderRadius || 0), Number(element.borderRadius || 0), 'S');
+            }
+
+            if (element.type === 'qr') {
+              const dataUrl = await QRCode.toDataURL(text, {
+                width: 360, margin: 1, errorCorrectionLevel: 'M',
+                color: { dark: hexColor(element.color) + 'FF', light: (fill ? hexColor(element.backgroundColor) : '#FFFFFFFF') }
+              });
+              doc.addImage(dataUrl, 'PNG', ex, ey, ew, eh);
+            } else if (element.type === 'barcode') {
+              const canvas = document.createElement('canvas');
+              JsBarcode(canvas, text, {
+                format: element.barcodeFormat || 'CODE128',
+                lineColor: hexColor(element.color),
+                background: fill ? hexColor(element.backgroundColor) : '#ffffff',
+                width: 2,
+                height: Math.max(28, Math.round(eh * 3.78)),
+                displayValue: element.displayValue !== false,
+                fontSize: 12,
+                margin: 2
+              });
+              doc.addImage(canvas.toDataURL('image/png'), 'PNG', ex, ey, ew, eh);
+            } else {
+              const family = pdfFont(element.fontFamily);
+              const size = Number(element.fontSize) || fontSize;
+              const align = element.align || 'left';
+              const textX = align === 'left' ? ex + 0.5 : align === 'right' ? ex + ew - 0.5 : ex + ew / 2;
+              const linesWrapped = doc.splitTextToSize(text, Math.max(2, ew - 1));
+              doc.setFont(family, element.bold ? 'bold' : 'normal');
+              doc.setFontSize(size);
+              doc.setTextColor(hexColor(element.color));
+              const lineHeightForElement = size * 0.3528 * 1.2;
+              let baseline = ey + size * 0.3528 + 0.4;
+              linesWrapped.forEach(part => { doc.text(part, textX, baseline, { align }); baseline += lineHeightForElement; });
+            }
+          }
         } else {
           const content = getLabelLines(record).map(line => ({ ...line, wrapped: doc.splitTextToSize(String(line.text), contentWidth) }));
           const totalHeight = content.reduce((sum, line) => sum + line.wrapped.length * lineHeight + lineGap, 0);
@@ -410,10 +620,12 @@ export default function App() {
             baseline += lineGap;
           });
         }
-      });
+      }
       doc.save('custom-labels' + (mode === 'selected' ? '-selected' : '') + '.pdf');
       setStatus({ type: 'success', text: source.length + ' labels exported to PDF.' });
-    } catch (error) { setStatus({ type: 'error', text: 'PDF export failed: ' + (error.message || 'Unknown error') }); }
+    } catch (error) {
+      setStatus({ type: 'error', text: 'PDF export failed: ' + (error.message || 'Unknown error') });
+    }
   }
   function toggleRecord(index) {
     setSelectedIndexes(old => old.includes(index) ? old.filter(value => value !== index) : [...old, index]);
@@ -425,7 +637,7 @@ export default function App() {
     const name = templateName.trim();
     if (!name) { setStatus({ type: 'error', text: 'Enter a name for this template.' }); return; }
     const id = 'tpl-' + Date.now();
-    const template = { id, name, customLayout, fields, lines, settings, visualLayout, visualElements, savedAt: new Date().toISOString() };
+    const template = { id, name, customLayout, fields, lines, settings, visualLayout, visualElements, labelBackground, savedAt: new Date().toISOString() };
     setSavedTemplates(old => [template, ...old.filter(item => item.name.toLowerCase() !== name.toLowerCase())]);
     setSelectedTemplateId(id);
     setStatus({ type: 'success', text: 'Template "' + name + '" saved in this browser.' });
@@ -444,6 +656,7 @@ export default function App() {
     setVisualLayout(Boolean(template.visualLayout));
     setVisualElements(template.visualElements || []);
     setSelectedVisualId(template.visualElements?.[0]?.id || '');
+    setLabelBackground(template.labelBackground || '');
     setSettings({ ...defaults, ...template.settings });
     setTemplateName(template.name);
     setStatus({ type: 'success', text: 'Template "' + template.name + '" applied.' });
@@ -503,17 +716,24 @@ export default function App() {
         <span>Place each text element anywhere inside the label.</span>
       </div>
       {visualLayout && <div className="visual-designer">
+        <div className="visual-background-toolbar">
+          <label>Label background image<input ref={backgroundInputRef} type="file" accept="image/*" onChange={e => { handleLabelBackground(e.currentTarget.files?.[0]); e.currentTarget.value = ''; }}/></label>
+          {labelBackground && <button className="button danger-button" onClick={() => setLabelBackground('')}>Remove background</button>}
+          <span>Images are resized automatically for lighter templates.</span>
+        </div>
         <div className="visual-editor-toolbar">
           <select value={newVisualField} onChange={e => setNewVisualField(e.target.value)}>
             <option value="">Choose Excel field…</option>
             {headers.map(header => <option key={header} value={header}>{header}</option>)}
           </select>
           <button className="button outline" disabled={!newVisualField} onClick={() => { createVisualElement('{@' + newVisualField + '}'); setNewVisualField(''); }}>Add field</button>
-          <button className="button secondary" onClick={() => createVisualElement('Custom text')}>Add text</button>
+          <button className="button secondary" onClick={() => createVisualElement('Custom text', 'text')}>Add text</button>
+          <button className="button outline" onClick={() => createVisualElement('{@Reg No}', 'qr')}>Add QR code</button>
+          <button className="button outline" onClick={() => createVisualElement('{@Reg No}', 'barcode')}>Add barcode</button>
         </div>
         <div className="visual-editor-grid">
           <div className="visual-canvas-wrap">
-            <div className="visual-canvas-caption">Drag elements to position them · measurements in mm</div>
+            <div className="visual-canvas-caption">Drag elements to position them · drag the blue corner to resize</div>
             {renderLabel(records[0] || sampleRows[0], true)}
           </div>
           <div className="visual-properties">
@@ -530,6 +750,25 @@ export default function App() {
                   <label>Text / field placeholders
                     <input value={element.text} onChange={e => updateVisualElement(element.id, { text: e.target.value })}/>
                   </label>
+                  {element.type === 'text' && <div className="visual-style-grid">
+                    <label>Font family<select value={element.fontFamily || 'Arial'} onChange={e => updateVisualElement(element.id, { fontFamily: e.target.value })}>
+                      <option>Arial</option><option>Helvetica</option><option>Times New Roman</option><option>Georgia</option><option>Courier New</option><option>Verdana</option><option>Tahoma</option>
+                    </select></label>
+                    <label>Text color<input type="color" value={element.color || '#111111'} onChange={e => updateVisualElement(element.id, { color: e.target.value })}/></label>
+                  </div>}
+                  <div className="visual-style-grid">
+                    <label>Background fill<input type="color" value={element.backgroundColor === 'transparent' ? '#ffffff' : (element.backgroundColor || '#ffffff')} onChange={e => updateVisualElement(element.id, { backgroundColor: e.target.value })}/></label>
+                    <label><span>Transparent fill</span><input type="checkbox" checked={element.backgroundColor === 'transparent'} onChange={e => updateVisualElement(element.id, { backgroundColor: e.target.checked ? 'transparent' : '#ffffff' })}/></label>
+                    <label>Border color<input type="color" value={element.borderColor || '#333333'} onChange={e => updateVisualElement(element.id, { borderColor: e.target.value })}/></label>
+                    <label>Border width (mm)<input type="number" min="0" max="2" step="0.1" value={element.borderWidth ?? 0} onChange={e => updateVisualElement(element.id, { borderWidth: Math.max(0, Math.min(2, Number(e.target.value) || 0)) })}/></label>
+                    <label>Corner radius (mm)<input type="number" min="0" max="10" step="0.5" value={element.borderRadius ?? 0} onChange={e => updateVisualElement(element.id, { borderRadius: Math.max(0, Math.min(10, Number(e.target.value) || 0)) })}/></label>
+                  </div>
+                  {element.type === 'barcode' && <div className="visual-style-grid">
+                    <label>Barcode format<select value={element.barcodeFormat || 'CODE128'} onChange={e => updateVisualElement(element.id, { barcodeFormat: e.target.value })}>
+                      <option value="CODE128">Code 128</option><option value="CODE39">Code 39</option><option value="EAN13">EAN-13</option><option value="EAN8">EAN-8</option><option value="UPC">UPC-A</option><option value="ITF">ITF</option>
+                    </select></label>
+                    <label><span>Show encoded value</span><input type="checkbox" checked={element.displayValue !== false} onChange={e => updateVisualElement(element.id, { displayValue: e.target.checked })}/></label>
+                  </div>}
                   <div className="visual-number-grid">
                     <label>X position (mm)<input type="number" step="0.5" min="0" max={settings.labelWidth} value={element.x} onChange={e => updateVisualElement(element.id, { x: Math.max(0, Math.min(Number(settings.labelWidth) - Number(element.width), Number(e.target.value))) })}/></label>
                     <label>Y position (mm)<input type="number" step="0.5" min="0" max={settings.labelHeight} value={element.y} onChange={e => updateVisualElement(element.id, { y: Math.max(0, Math.min(Number(settings.labelHeight) - Number(element.height), Number(e.target.value))) })}/></label>
@@ -539,6 +778,7 @@ export default function App() {
                     <label>Alignment<select value={element.align} onChange={e => updateVisualElement(element.id, { align: e.target.value })}><option value="left">Left</option><option value="center">Center</option><option value="right">Right</option></select></label>
                   </div>
                   <label className="bold-toggle visual-bold"><input type="checkbox" checked={element.bold} onChange={e => updateVisualElement(element.id, { bold: e.target.checked })}/> Bold text</label>
+                  {element.type === 'text' && <label className="bold-toggle visual-bold"><input type="checkbox" checked={element.bold} onChange={e => updateVisualElement(element.id, { bold: e.target.checked })}/> Bold text</label>}
                   <button className="button danger-button" onClick={() => removeVisualElement(element.id)}><Trash2 size={14}/> Remove element</button>
                 </>;
               })()}

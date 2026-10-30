@@ -30,8 +30,10 @@ npm run preview
 - Save and reuse named label templates in the browser.
 - Export generated labels directly to PDF or Excel.
 - Drag the line-number handle to reorder custom label lines.
-- Optional visual canvas designer: add field/text elements, drag to position, and adjust X/Y, width, height, font size, weight, and alignment.
-- Save visual layouts in reusable templates. Visual positioning is respected by print and PDF output.
+- Optional visual canvas designer: add field/text elements, drag to position, resize with a corner handle, and adjust X/Y, width, height, font family, font size, weight, text color, fill, border and corner radius.
+- Add QR codes and configurable barcodes (Code 128, Code 39, EAN-13, EAN-8, UPC-A, ITF) using Excel placeholders.
+- Add an optimized image as a full-label background.
+- Save visual layouts in reusable templates. Visual positioning, colors, borders, QR codes, barcodes and background images are respected by print and PDF output.
 - Switch between worksheets in a multi-sheet workbook.
 - Select individual records for printing and exports.
 - Persist page and label settings between visits.
