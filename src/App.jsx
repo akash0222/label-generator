@@ -635,10 +635,6 @@ export default function App() {
               }
               continue;
             }
-            const ex = x + Number(element.x);
-            const ey = y + Number(element.y);
-            const ew = Number(element.width);
-            const eh = Number(element.height);
             const fill = element.backgroundColor && element.backgroundColor !== 'transparent';
             const bordered = Number(element.borderWidth) > 0;
             if (fill || bordered) {
