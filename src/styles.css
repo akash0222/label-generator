@@ -141,3 +141,5 @@
 @media print{.workflow-nav{display:none!important}}
 @media(max-width:780px){.workflow-nav{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:480px){.workflow-nav button{padding:8px 7px;gap:6px}.workflow-nav button>span{flex-basis:25px;height:25px}.workflow-nav strong{font-size:10px}.workflow-nav small{font-size:8px}}
+
+.status.warning{color:#8b6a18}
