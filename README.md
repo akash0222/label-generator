@@ -33,7 +33,11 @@ npm run preview
 - Optional visual canvas designer: add field/text elements, drag to position, resize with a corner handle, and adjust X/Y, width, height, font family, font size, weight, text color, fill, border and corner radius.
 - Add QR codes and configurable barcodes (Code 128, Code 39, EAN-13, EAN-8, UPC-A, ITF) using Excel placeholders.
 - Add an optimized image as a full-label background.
-- Save visual layouts in reusable templates. Visual positioning, colors, borders, QR codes, barcodes and background images are respected by print and PDF output.
+- Create, rename, switch, duplicate and delete multiple label design pages in one project.
+- Add editable rectangle, circle and line shape elements.
+- Upload separately positioned logo images as individual elements.
+- Start with Address, Student, Inventory and Shipping ready-made layouts.
+- Save visual layouts in reusable templates. Visual positioning, colors, borders, QR codes, barcodes, logos and background images are respected by print and PDF output. Named templates can store multiple design pages.
 - Switch between worksheets in a multi-sheet workbook.
 - Select individual records for printing and exports.
 - Persist page and label settings between visits.

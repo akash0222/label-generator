@@ -108,7 +108,15 @@ export default function App() {
   const [visualDrag, setVisualDrag] = useState(null);
   const [newVisualField, setNewVisualField] = useState('');
   const [labelBackground, setLabelBackground] = useState('');
+  const [designPages, setDesignPages] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('label-generator-design-pages-v1')) || [{ id:'design-1', name:'Design 1', visualElements:[], labelBackground:'', settings:defaults, visualLayout:true }]; }
+    catch { return [{ id:'design-1', name:'Design 1', visualElements:[], labelBackground:'', settings:defaults, visualLayout:true }]; }
+  });
+  const [activeDesignPageId, setActiveDesignPageId] = useState('design-1');
+  const [designPageName, setDesignPageName] = useState('Design 1');
+  const skipDesignSyncRef = useRef(false);
   const backgroundInputRef = useRef(null);
+  const logoInputRef = useRef(null);
   const fileRef = useRef(null);
   const workbookRef = useRef(null);
   const enabledFields = fields.filter(field => field.enabled);
@@ -161,6 +169,16 @@ export default function App() {
   useEffect(() => {
     try { localStorage.setItem('label-generator-templates-v1', JSON.stringify(savedTemplates)); } catch { /* Storage may be disabled. */ }
   }, [savedTemplates]);
+
+  useEffect(() => {
+    try { localStorage.setItem('label-generator-design-pages-v1', JSON.stringify(designPages)); } catch { /* Large image-based designs may exceed browser storage. Save a named template to keep a copy. */ }
+  }, [designPages]);
+  useEffect(() => {
+    if (skipDesignSyncRef.current) { skipDesignSyncRef.current = false; return; }
+    setDesignPages(old => old.map(page => page.id === activeDesignPageId
+      ? { ...page, name: designPageName, visualElements, labelBackground, settings, visualLayout }
+      : page));
+  }, [visualElements, labelBackground, settings, visualLayout, activeDesignPageId, designPageName]);
 
   useEffect(() => {
     const presets = { A3: [297, 420], A4: [210, 297], A5: [148, 210], Letter: [215.9, 279.4], Legal: [215.9, 355.6] };
@@ -294,8 +312,9 @@ export default function App() {
   function createVisualElement(text, type = 'text') {
     const index = visualElements.length;
     const isCode = type === 'qr' || type === 'barcode';
-    const width = type === 'qr' ? 22 : type === 'barcode' ? 52 : Math.max(10, Number(settings.labelWidth) - 6);
-    const height = type === 'qr' ? 22 : type === 'barcode' ? 15 : 6;
+    const isShape = ['rectangle','circle','line'].includes(type);
+    const width = type === 'qr' ? 22 : type === 'barcode' ? 52 : type === 'circle' ? 12 : type === 'line' ? 32 : type === 'rectangle' ? 24 : type === 'logo' ? 18 : Math.max(10, Number(settings.labelWidth) - 6);
+    const height = type === 'qr' || type === 'circle' ? 22 : type === 'barcode' ? 15 : type === 'line' ? 1 : type === 'rectangle' ? 14 : type === 'logo' ? 12 : 6;
     const element = {
       id: 've-' + Date.now() + '-' + index,
       type,
@@ -307,17 +326,19 @@ export default function App() {
       fontSize: Number(settings.fontSize) || 11,
       fontFamily: 'Arial',
       color: '#111111',
-      backgroundColor: '#ffffff',
+      backgroundColor: isShape ? '#eaf0ff' : 'transparent',
       borderColor: '#333333',
-      borderWidth: 0,
-      borderRadius: 0,
-      bold: !isCode,
+      borderWidth: type === 'line' ? 0.4 : 0,
+      borderRadius: type === 'circle' ? 50 : 0,
+      bold: !isCode && !isShape && type !== 'logo',
+      imageSrc: '',
       align: 'left',
       barcodeFormat: 'CODE128',
       displayValue: true
     };
     setVisualElements(old => [...old, element]);
     setSelectedVisualId(element.id);
+    return element.id;
   }
   function enableVisualLayout(checked) {
     setVisualLayout(checked);
@@ -408,75 +429,117 @@ export default function App() {
       updateVisualElement(element.id, { x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10 });
     }
   }
+  function saveCurrentDesignPage() {
+    return designPages.map(page => page.id === activeDesignPageId ? { ...page, name:designPageName, visualElements, labelBackground, settings, visualLayout } : page);
+  }
+  function switchDesignPage(id) {
+    if (id === activeDesignPageId) return;
+    const pages = saveCurrentDesignPage();
+    const target = pages.find(page => page.id === id);
+    if (!target) return;
+    setDesignPages(pages); skipDesignSyncRef.current = true;
+    setActiveDesignPageId(id); setDesignPageName(target.name);
+    setVisualElements(target.visualElements || []); setLabelBackground(target.labelBackground || '');
+    setSettings({ ...defaults, ...(target.settings || {}) }); setVisualLayout(Boolean(target.visualLayout));
+    setSelectedVisualId(target.visualElements?.[0]?.id || ''); setVisualDrag(null);
+  }
+  function addDesignPage() {
+    const pages = saveCurrentDesignPage(), id = 'design-' + Date.now();
+    const page = { id, name:'Design ' + (pages.length+1), visualElements:[], labelBackground:'', settings:{...settings}, visualLayout:true };
+    setDesignPages([...pages,page]); skipDesignSyncRef.current = true;
+    setActiveDesignPageId(id); setDesignPageName(page.name);
+    setVisualElements([]); setLabelBackground(''); setVisualLayout(true); setSelectedVisualId('');
+    setStatus({type:'success',text:'New design page created.'});
+  }
+  function duplicateDesignPage() {
+    const pages=saveCurrentDesignPage(), current=pages.find(page=>page.id===activeDesignPageId);
+    if(!current) return;
+    const id='design-'+Date.now();
+    const copy={...current,id,name:current.name+' copy',visualElements:current.visualElements.map((element,index)=>({...element,id:id+'-el-'+index}))};
+    setDesignPages([...pages,copy]); skipDesignSyncRef.current=true;
+    setActiveDesignPageId(id); setDesignPageName(copy.name); setVisualElements(copy.visualElements);
+    setLabelBackground(copy.labelBackground||''); setSettings({...defaults,...(copy.settings||{})});
+    setVisualLayout(true); setSelectedVisualId(copy.visualElements[0]?.id||'');
+    setStatus({type:'success',text:'Design page duplicated.'});
+  }
+  function deleteDesignPage() {
+    if(designPages.length<=1) return setStatus({type:'error',text:'At least one design page must remain.'});
+    const pages=saveCurrentDesignPage(), index=pages.findIndex(page=>page.id===activeDesignPageId);
+    const remaining=pages.filter(page=>page.id!==activeDesignPageId), target=remaining[Math.max(0,index-1)]||remaining[0];
+    setDesignPages(remaining); skipDesignSyncRef.current=true;
+    setActiveDesignPageId(target.id); setDesignPageName(target.name); setVisualElements(target.visualElements||[]);
+    setLabelBackground(target.labelBackground||''); setSettings({...defaults,...(target.settings||{})});
+    setVisualLayout(Boolean(target.visualLayout)); setSelectedVisualId(target.visualElements?.[0]?.id||'');
+  }
+  function applyStarterTemplate(kind) {
+    const width=Number(settings.labelWidth), height=Number(settings.labelHeight), full=Math.max(10,width-6);
+    const text=(id,value,y,size,bold=false,w=full,x=3,h=6)=>({id,type:'text',text:value,x,y,width:w,height:h,fontSize:size,fontFamily:'Arial',color:'#111111',backgroundColor:'transparent',borderColor:'#333333',borderWidth:0,borderRadius:0,bold,align:'left'});
+    const code=(id,type,value,x,y,w,h)=>({...text(id,value,y,8,false,w,x,h),type,backgroundColor:'#ffffff',barcodeFormat:'CODE128',displayValue:true});
+    let elements=[];
+    if(kind==='address') elements=[text('address-name','{@Salutation} {@Student Name} {@relationship} {@Father Name}',2,9,true,full,3,5),text('address-line','Address:- {@Address}, {@City}, {@State}, {@Pincode}',10,8,false,full,3,6),text('address-phone','Mo. {@Mobile No}, {@Father Phone no:}',21,8,false,full,3,5)];
+    if(kind==='student') elements=[text('student-name','{@Student Name}',3,12,true,full-25,3,7),text('student-reg','Reg. No.: {@Reg No}',12,9,false,full-25,3,5),text('student-course','{@Program} | {@Batch}',20,8,false,full-25,3,5),code('student-qr','qr','{@Reg No}',Math.max(3,width-25),6,20,20)];
+    if(kind==='inventory') elements=[text('inventory-name','{@Item Name}',2,10,true,full,3,6),text('inventory-sku','SKU: {@SKU}',10,8,false,full,3,5),code('inventory-barcode','barcode','{@SKU}',3,Math.max(3,height-14),Math.min(width-8,65),11)];
+    if(kind==='shipping') elements=[text('shipping-name','To: {@Recipient Name}',2,9,true,full,3,5),text('shipping-address','{@Address}, {@City}, {@State}, {@Pincode}',9,8,false,full,3,7),text('shipping-phone','Phone: {@Mobile No}',19,8,false,full,3,5),code('shipping-barcode','barcode','{@Tracking No}',Math.max(3,width-38),Math.max(3,height-9),35,7)];
+    setVisualElements(elements); setVisualLayout(true); setLabelBackground(''); setSelectedVisualId(elements[0]?.id||'');
+    const name=({address:'Address label',student:'Student label',inventory:'Inventory label',shipping:'Shipping label'})[kind];
+    setDesignPageName(name); setDesignPages(old=>old.map(page=>page.id===activeDesignPageId?{...page,name}:page));
+    setStatus({type:'success',text:'Starter design applied. Update placeholders to match your worksheet columns.'});
+  }
+  async function handleLogoUpload(file, replaceId = '') {
+    if(!file) return;
+    if(!file.type.startsWith('image/')) return setStatus({type:'error',text:'Choose an image file for the logo.'});
+    if(file.size>8*1024*1024) return setStatus({type:'error',text:'Logo image must be 8 MB or smaller.'});
+    try {
+      const dataUrl=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(new Error('Could not read logo image.'));reader.readAsDataURL(file);});
+      const image=await new Promise((resolve,reject)=>{const img=new Image();img.onload=()=>resolve(img);img.onerror=()=>reject(new Error('Unsupported logo image.'));img.src=dataUrl;});
+      const scale=Math.min(1,1000/Math.max(image.naturalWidth,image.naturalHeight));
+      const canvas=document.createElement('canvas');canvas.width=Math.max(1,Math.round(image.naturalWidth*scale));canvas.height=Math.max(1,Math.round(image.naturalHeight*scale));
+      canvas.getContext('2d').drawImage(image,0,0,canvas.width,canvas.height);
+      const optimized=canvas.toDataURL('image/png');
+      if(replaceId) setVisualElements(old=>old.map(element=>element.id===replaceId?{...element,imageSrc:optimized,text:file.name}:element));
+      else {const id=createVisualElement(file.name,'logo');setVisualElements(old=>old.map(element=>element.id===id?{...element,imageSrc:optimized}:element));}
+      setVisualLayout(true); setStatus({type:'success',text:replaceId?'Logo replaced.':'Logo added. Drag and resize it on the label canvas.'});
+    } catch(error) {setStatus({type:'error',text:error.message||'Could not process logo image.'});}
+  }
+
   function renderLabel(record, editing = false) {
-    if (visualLayout) {
-      return <div className="label visual-label">
-        {labelBackground && <img className="label-background" src={labelBackground} alt="" draggable="false"/>}
-        {visualElements.map(element => {
-          const text = renderLine(element.text, record);
-          if (!text) return null;
-          const isSelected = editing && selectedVisualId === element.id;
-          const elementStyle = {
-            left: element.x + 'mm',
-            top: element.y + 'mm',
-            width: element.width + 'mm',
-            height: element.height + 'mm',
-            fontSize: (Number(element.fontSize) || 11) + 'pt',
-            fontFamily: element.fontFamily || 'Arial',
-            fontWeight: element.bold ? 700 : 400,
-            color: element.color || '#111111',
-            backgroundColor: element.backgroundColor || 'transparent',
-            borderColor: element.borderColor || '#333333',
-            borderWidth: Number(element.borderWidth || 0) + 'mm',
-            borderStyle: 'solid',
-            borderRadius: Number(element.borderRadius || 0) + 'mm',
-            textAlign: element.align || 'left',
-            justifyContent: element.align === 'center' ? 'center' : element.align === 'right' ? 'flex-end' : 'flex-start'
-          };
-          const moveStart = event => {
-            event.preventDefault();
-            event.currentTarget.setPointerCapture(event.pointerId);
-            setSelectedVisualId(element.id);
-            setVisualDrag({ id: element.id, mode: 'move', startClientX: event.clientX, startClientY: event.clientY, startX: Number(element.x), startY: Number(element.y) });
-          };
-          const content = element.type === 'qr'
-            ? <QrCodeVisual value={text} foreground={element.color} background={element.backgroundColor}/>
-            : element.type === 'barcode'
-              ? <BarcodeVisual value={text} format={element.barcodeFormat} foreground={element.color} background={element.backgroundColor} displayValue={element.displayValue !== false}/>
-              : <span className="visual-text-content">{text}</span>;
-          return <div
-            key={element.id}
-            className={'visual-element ' + (element.type || 'text') + (isSelected ? ' is-selected' : '')}
-            style={elementStyle}
-            onPointerDown={editing ? moveStart : undefined}
-            onPointerMove={editing ? event => moveVisualElement(event, element) : undefined}
-            onPointerUp={editing ? () => setVisualDrag(null) : undefined}
-            onPointerCancel={editing ? () => setVisualDrag(null) : undefined}
-            title={editing ? 'Drag to move. Use the bottom-right handle to resize.' : undefined}
-          >
-            {content}
-            {isSelected && <span
-              className="resize-handle"
-              role="button"
-              aria-label="Resize selected element"
-              title="Drag to resize"
-              onPointerDown={event => {
-                event.preventDefault();
-                event.stopPropagation();
-                event.currentTarget.parentElement.setPointerCapture(event.pointerId);
-                setVisualDrag({
-                  id: element.id, mode: 'resize',
-                  startClientX: event.clientX, startClientY: event.clientY,
-                  startX: Number(element.x), startY: Number(element.y),
-                  startWidth: Number(element.width), startHeight: Number(element.height)
-                });
-              }}
-            />}
-          </div>;
-        })}
-      </div>;
-    }
-    return <div className="label">{getLabelLines(record).map(line => <div className={'label-line' + (line.bold ? ' bold' : '')} key={line.id}>{line.text}</div>)}</div>;
+    if(visualLayout) return <div className="label visual-label">
+      {labelBackground && <img className="label-background" src={labelBackground} alt="" draggable="false"/>}
+      {visualElements.map(element=>{
+        const isShape=['rectangle','circle','line'].includes(element.type);
+        const text=element.type==='logo'?element.text:renderLine(element.text,record);
+        if(!text&&!isShape) return null;
+        const selected=editing&&selectedVisualId===element.id;
+        const style={
+          left:element.x+'mm',top:element.y+'mm',width:element.width+'mm',height:element.height+'mm',
+          fontSize:(Number(element.fontSize)||11)+'pt',fontFamily:element.fontFamily||'Arial',
+          fontWeight:element.bold?700:400,color:element.color||'#111111',
+          backgroundColor:element.type==='line'?(element.color||'#111111'):(element.backgroundColor||'transparent'),
+          borderColor:element.borderColor||'#333333',borderWidth:element.type==='line'?'0mm':Number(element.borderWidth||0)+'mm',
+          borderStyle:'solid',borderRadius:element.type==='circle'?'50%':Number(element.borderRadius||0)+'mm',
+          textAlign:element.align||'left',justifyContent:element.align==='center'?'center':element.align==='right'?'flex-end':'flex-start'
+        };
+        const startMove=event=>{event.preventDefault();event.currentTarget.setPointerCapture(event.pointerId);setSelectedVisualId(element.id);setVisualDrag({id:element.id,mode:'move',startClientX:event.clientX,startClientY:event.clientY,startX:Number(element.x),startY:Number(element.y)});};
+        const content=element.type==='qr'?<QrCodeVisual value={text} foreground={element.color} background={element.backgroundColor}/>
+          :element.type==='barcode'?<BarcodeVisual value={text} format={element.barcodeFormat} foreground={element.color} background={element.backgroundColor} displayValue={element.displayValue!==false}/>
+          :element.type==='logo'?<img className="logo-visual" src={element.imageSrc} alt="Label logo" draggable="false"/>
+          :isShape?<span className={'shape-visual shape-'+element.type}/>
+          :<span className="visual-text-content">{text}</span>;
+        return <div key={element.id} className={'visual-element '+(element.type||'text')+(selected?' is-selected':'')} style={style}
+          onPointerDown={editing?startMove:undefined}
+          onPointerMove={editing?event=>moveVisualElement(event,element):undefined}
+          onPointerUp={editing?()=>setVisualDrag(null):undefined}
+          onPointerCancel={editing?()=>setVisualDrag(null):undefined}
+          title={editing?'Drag to move. Use the bottom-right handle to resize.':undefined}>
+          {content}
+          {selected&&<span className="resize-handle" role="button" aria-label="Resize selected element" title="Drag to resize" onPointerDown={event=>{
+            event.preventDefault();event.stopPropagation();event.currentTarget.parentElement.setPointerCapture(event.pointerId);
+            setVisualDrag({id:element.id,mode:'resize',startClientX:event.clientX,startClientY:event.clientY,startX:Number(element.x),startY:Number(element.y),startWidth:Number(element.width),startHeight:Number(element.height)});
+          }}/>}
+        </div>;
+      })}
+    </div>;
+    return <div className="label">{getLabelLines(record).map(line=><div className={'label-line'+(line.bold?' bold':'')} key={line.id}>{line.text}</div>)}</div>;
   }
   function validateForOutput(source) {
     if (!source.length) { setStatus({ type: 'error', text: 'No records are selected for this action.' }); return false; }
@@ -551,8 +614,27 @@ export default function App() {
         if (visualLayout) {
           if (labelBackground) doc.addImage(labelBackground, 'JPEG', x, y, labelWidth, labelHeight);
           for (const element of visualElements) {
-            const text = renderLine(element.text, record);
-            if (!text) continue;
+            const isShape=['rectangle','circle','line'].includes(element.type);
+            const text=element.type==='logo'?element.text:renderLine(element.text,record);
+            if(!text&&!isShape) continue;
+            const ex=x+Number(element.x), ey=y+Number(element.y), ew=Number(element.width), eh=Number(element.height);
+            if(isShape){
+              const fill=element.backgroundColor&&element.backgroundColor!=='transparent';
+              const stroke=Number(element.borderWidth)>0;
+              if(element.type==='line'){
+                doc.setDrawColor(hexColor(element.color||element.borderColor));
+                doc.setLineWidth(Math.max(0.2,Number(element.borderWidth)||0.4));
+                doc.line(ex,ey+eh/2,ex+ew,ey+eh/2);
+              } else {
+                if(fill) doc.setFillColor(hexColor(element.backgroundColor));
+                doc.setDrawColor(hexColor(element.borderColor));
+                doc.setLineWidth(Math.max(0.1,Number(element.borderWidth)||0.2));
+                const mode=fill&&stroke?'FD':fill?'F':'S';
+                if(element.type==='circle') doc.ellipse(ex+ew/2,ey+eh/2,ew/2,eh/2,mode);
+                else doc.roundedRect(ex,ey,ew,eh,Number(element.borderRadius||0),Number(element.borderRadius||0),mode);
+              }
+              continue;
+            }
             const ex = x + Number(element.x);
             const ey = y + Number(element.y);
             const ew = Number(element.width);
@@ -570,7 +652,9 @@ export default function App() {
               else doc.roundedRect(ex, ey, ew, eh, Number(element.borderRadius || 0), Number(element.borderRadius || 0), 'S');
             }
 
-            if (element.type === 'qr') {
+            if(element.type==='logo'){
+              if(element.imageSrc) doc.addImage(element.imageSrc,'PNG',ex,ey,ew,eh);
+            } else             if (element.type === 'qr') {
               const dataUrl = await QRCode.toDataURL(text, {
                 width: 360, margin: 1, errorCorrectionLevel: 'M',
                 color: { dark: hexColor(element.color) + 'FF', light: (fill ? hexColor(element.backgroundColor) : '#FFFFFFFF') }
@@ -637,7 +721,7 @@ export default function App() {
     const name = templateName.trim();
     if (!name) { setStatus({ type: 'error', text: 'Enter a name for this template.' }); return; }
     const id = 'tpl-' + Date.now();
-    const template = { id, name, customLayout, fields, lines, settings, visualLayout, visualElements, labelBackground, savedAt: new Date().toISOString() };
+    const template = { id, name, customLayout, fields, lines, settings, visualLayout, visualElements, labelBackground, designPages: saveCurrentDesignPage(), activeDesignPageId, savedAt: new Date().toISOString() };
     setSavedTemplates(old => [template, ...old.filter(item => item.name.toLowerCase() !== name.toLowerCase())]);
     setSelectedTemplateId(id);
     setStatus({ type: 'success', text: 'Template "' + name + '" saved in this browser.' });
@@ -657,6 +741,16 @@ export default function App() {
     setVisualElements(template.visualElements || []);
     setSelectedVisualId(template.visualElements?.[0]?.id || '');
     setLabelBackground(template.labelBackground || '');
+    if(template.designPages?.length){
+      const active=template.designPages.find(page=>page.id===template.activeDesignPageId)||template.designPages[0];
+      setDesignPages(template.designPages);skipDesignSyncRef.current=true;
+      setActiveDesignPageId(active.id);setDesignPageName(active.name||'Design 1');
+      setVisualElements(active.visualElements||[]);setLabelBackground(active.labelBackground||'');
+      setSettings({...defaults,...(active.settings||template.settings)});setVisualLayout(Boolean(active.visualLayout));
+    } else {
+      setDesignPages([{id:'design-1',name:'Design 1',visualElements:template.visualElements||[],labelBackground:template.labelBackground||'',settings:{...defaults,...template.settings},visualLayout:Boolean(template.visualLayout)}]);
+      setActiveDesignPageId('design-1');setDesignPageName('Design 1');
+    }
     setSettings({ ...defaults, ...template.settings });
     setTemplateName(template.name);
     setStatus({ type: 'success', text: 'Template "' + template.name + '" applied.' });
@@ -715,6 +809,23 @@ export default function App() {
         <label className="toggle"><input type="checkbox" checked={visualLayout} onChange={e => enableVisualLayout(e.target.checked)}/> Use visual canvas designer</label>
         <span>Place each text element anywhere inside the label.</span>
       </div>
+      <div className="design-pages-toolbar">
+        <div className="design-pages-heading"><strong>Label design pages</strong><span>Keep different label layouts in one project.</span></div>
+        <select value={activeDesignPageId} onChange={e=>switchDesignPage(e.target.value)} aria-label="Active design page">
+          {designPages.map((page,index)=><option key={page.id} value={page.id}>{index+1}. {page.name}</option>)}
+        </select>
+        <input value={designPageName} onChange={e=>{setDesignPageName(e.target.value);setDesignPages(old=>old.map(page=>page.id===activeDesignPageId?{...page,name:e.target.value}:page));}} aria-label="Design page name" placeholder="Design page name"/>
+        <button className="button outline" onClick={addDesignPage}><Plus size={14}/> Add page</button>
+        <button className="button secondary" onClick={duplicateDesignPage}>Duplicate</button>
+        <button className="button danger-button" onClick={deleteDesignPage} disabled={designPages.length<=1}>Delete</button>
+      </div>
+      <div className="starter-library">
+        <div><strong>Ready-made templates</strong><span>Choose a starter layout and customize the fields.</span></div>
+        <button className="button outline" onClick={()=>applyStarterTemplate('address')}>Address</button>
+        <button className="button outline" onClick={()=>applyStarterTemplate('student')}>Student</button>
+        <button className="button outline" onClick={()=>applyStarterTemplate('inventory')}>Inventory</button>
+        <button className="button outline" onClick={()=>applyStarterTemplate('shipping')}>Shipping</button>
+      </div>
       {visualLayout && <div className="visual-designer">
         <div className="visual-background-toolbar">
           <label>Label background image<input ref={backgroundInputRef} type="file" accept="image/*" onChange={e => { handleLabelBackground(e.currentTarget.files?.[0]); e.currentTarget.value = ''; }}/></label>
@@ -730,6 +841,10 @@ export default function App() {
           <button className="button secondary" onClick={() => createVisualElement('Custom text', 'text')}>Add text</button>
           <button className="button outline" onClick={() => createVisualElement('{@Reg No}', 'qr')}>Add QR code</button>
           <button className="button outline" onClick={() => createVisualElement('{@Reg No}', 'barcode')}>Add barcode</button>
+          <button className="button outline" onClick={() => createVisualElement('', 'rectangle')}>Rectangle</button>
+          <button className="button outline" onClick={() => createVisualElement('', 'circle')}>Circle</button>
+          <button className="button outline" onClick={() => createVisualElement('', 'line')}>Line</button>
+          <label className="button outline logo-upload-button">Add logo<input ref={logoInputRef} type="file" accept="image/*" hidden onChange={e=>{handleLogoUpload(e.currentTarget.files?.[0]);e.currentTarget.value='';}}/></label>
         </div>
         <div className="visual-editor-grid">
           <div className="visual-canvas-wrap">
@@ -747,9 +862,10 @@ export default function App() {
                 const element = visualElements.find(item => item.id === selectedVisualId);
                 if (!element) return <div className="empty">Select an element to edit its properties.</div>;
                 return <>
-                  <label>Text / field placeholders
+                  {!['rectangle','circle','line','logo'].includes(element.type) && <label>Text / field placeholders
                     <input value={element.text} onChange={e => updateVisualElement(element.id, { text: e.target.value })}/>
-                  </label>
+                  </label>}
+                  {element.type==='logo' && <label>Replace logo image<input type="file" accept="image/*" onChange={e=>{handleLogoUpload(e.currentTarget.files?.[0],element.id);e.currentTarget.value='';}}/></label>}
                   {element.type === 'text' && <div className="visual-style-grid">
                     <label>Font family<select value={element.fontFamily || 'Arial'} onChange={e => updateVisualElement(element.id, { fontFamily: e.target.value })}>
                       <option>Arial</option><option>Helvetica</option><option>Times New Roman</option><option>Georgia</option><option>Courier New</option><option>Verdana</option><option>Tahoma</option>

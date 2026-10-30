@@ -95,3 +95,23 @@
   .resize-handle{display:none!important}
   .label-background{print-color-adjust:exact;-webkit-print-color-adjust:exact}
 }
+
+/* Multiple design pages and starter template library */
+.design-pages-toolbar{display:grid;grid-template-columns:minmax(150px,1fr) minmax(150px,.8fr) minmax(130px,.7fr) auto auto auto;gap:8px;align-items:center;margin:0 0 12px;padding:11px;border:1px solid #e5ebf5;border-radius:9px;background:#f8faff}
+.design-pages-heading strong,.design-pages-heading span,.starter-library>div strong,.starter-library>div span{display:block}
+.design-pages-heading strong,.starter-library>div strong{font-size:11px;color:#34435d}
+.design-pages-heading span,.starter-library>div span{font-size:9px;color:#8490a2;margin-top:3px}
+.design-pages-toolbar select,.design-pages-toolbar input{height:33px;min-width:0;width:100%;border:1px solid #dfe5ef;border-radius:6px;background:#fff;padding:0 8px;color:#35435b;font-size:10px}
+.starter-library{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin:0 0 12px;padding:11px;border:1px solid #e5ebf5;border-radius:9px;background:#fff}
+.starter-library>div{margin-right:auto;min-width:155px}
+.starter-library .button{padding:8px 10px;font-size:10px}
+.logo-upload-button{position:relative;overflow:hidden}
+.logo-upload-button input{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer}
+.shape-visual{display:block;width:100%;height:100%;pointer-events:none}
+.shape-circle{border-radius:50%;background:transparent}
+.shape-line{height:100%;background:transparent;border-top:1px solid currentColor}
+.shape-rectangle{background:transparent}
+.logo-visual{width:100%;height:100%;object-fit:contain;display:block;pointer-events:none}
+@media(max-width:1050px){.design-pages-toolbar{grid-template-columns:1fr 1fr 1fr}.design-pages-heading{grid-column:1/-1}}
+@media(max-width:650px){.design-pages-toolbar{grid-template-columns:1fr 1fr}.design-pages-heading{grid-column:1/-1}.starter-library>div{flex-basis:100%}}
+@media print{.design-pages-toolbar,.starter-library{display:none!important}}
