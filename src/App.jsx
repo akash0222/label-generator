@@ -135,7 +135,7 @@ function getPageMetricsForSettings(settings) {
 }
 
 function readInitialProjectState() {
-  const fallbackPage = { id: 'design-1', name: 'Design 1', visualElements: [], labelBackground: '', settings: defaults, visualLayout: true, fields: [], lines: [], customLayout: false };
+  const fallbackPage = { id: 'design-1', name: 'Design 1', visualElements: [], labelBackground: '', settings: defaults, visualLayout: false, fields: [], lines: [], customLayout: false };
   const numberOr = (value, fallback) => Number.isFinite(Number(value)) ? Number(value) : fallback;
   let pages = [];
   let templates = [];
@@ -253,6 +253,7 @@ export default function App() {
   const logoInputRef = useRef(null);
   const fileRef = useRef(null);
   const workbookRef = useRef(null);
+  const importRequestRef = useRef(0);
   const enabledFields = fields.filter(field => field.enabled);
   const perPage = Math.max(1, Math.round(Number(settings.columns) || 1) * Math.round(Number(settings.rows) || 1));
   const pages = useMemo(() => { const out = []; for (let i = 0; i < records.length; i += perPage) out.push(records.slice(i, i + perPage)); return out; }, [records, perPage]);
@@ -384,6 +385,11 @@ export default function App() {
         setPrintRunJobs(null);
         return;
       }
+      if (root.querySelector('.code-error')) {
+        setStatus({ type: 'error', text: 'A QR code or barcode could not be generated. Correct the value or format before printing.' });
+        setPrintRunJobs(null);
+        return;
+      }
       try {
         const images = Array.from(root.querySelectorAll('img'));
         await Promise.all(images.map(image => {
@@ -457,6 +463,7 @@ export default function App() {
     setFields(mappedFields);
     setLines(nextLines);
     setCustomLayout(false);
+    if (visualLayout && !visualElements.length && !labelBackground) setVisualLayout(false);
     setShowAll(false);
     setPrintSelectionOnly(false);
     setStatus({ type: 'success', text: data.length + ' records loaded from worksheet "' + sheetName + '".' });
@@ -464,32 +471,42 @@ export default function App() {
 
   async function loadFile(file) {
     if (!file) return;
+    const requestId = ++importRequestRef.current;
     try {
       if (file.size > MAX_UPLOAD_BYTES) throw new Error('File is larger than 20 MB. Please use a smaller spreadsheet.');
       const extension = file.name.split('.').pop().toLowerCase();
       if (!['xlsx', 'xls', 'csv'].includes(extension)) throw new Error('Unsupported file type. Upload an XLSX, XLS or CSV file.');
+      setStatus({ type: 'info', text: 'Reading "' + file.name + '"…' });
+      const buffer = await file.arrayBuffer();
       const XLSX = await import('xlsx');
-      const book = XLSX.read(await file.arrayBuffer(), { type: 'array', cellDates: true, cellFormula: false, cellHTML: false });
+      if (requestId !== importRequestRef.current) return;
+      const book = XLSX.read(buffer, { type: 'array', cellDates: true, cellFormula: false, cellHTML: false });
       if (!book.SheetNames.length) throw new Error('No worksheets found.');
+      if (requestId !== importRequestRef.current) return;
       workbookRef.current = book;
       setSheetNames(book.SheetNames);
       applyWorksheet(book, book.SheetNames[0], file.name, XLSX);
     } catch (error) {
-      setStatus({ type: 'error', text: error.message || 'Could not read this file.' });
+      if (requestId === importRequestRef.current) setStatus({ type: 'error', text: error.message || 'Could not read this file.' });
     }
   }
 
   async function changeWorksheet(sheetName) {
     if (!workbookRef.current) return;
+    const requestId = ++importRequestRef.current;
+    const currentBook = workbookRef.current;
+    const currentFileName = fileName;
     try {
       const XLSX = await import('xlsx');
-      applyWorksheet(workbookRef.current, sheetName, fileName, XLSX);
+      if (requestId !== importRequestRef.current) return;
+      applyWorksheet(currentBook, sheetName, currentFileName, XLSX);
     } catch (error) {
-      setStatus({ type: 'error', text: error.message || 'Could not switch worksheets.' });
+      if (requestId === importRequestRef.current) setStatus({ type: 'error', text: error.message || 'Could not switch worksheets.' });
     }
   }
 
   function loadSample() {
+    importRequestRef.current += 1;
     const cols = Object.keys(sampleRows[0]);
     workbookRef.current = null;
     setSheetNames([]); setSelectedSheet('');
@@ -501,7 +518,9 @@ export default function App() {
       { id: 'l2', text: 'Address:- {@Address}, {@City}, {@State}, {@Pincode}', bold: false },
       { id: 'l3', text: 'Mo. {@Mobile No}, {@Father Phone no:}', bold: false }
     ]);
-    setCustomLayout(false); setStatus({ type: 'success', text: 'Sample records loaded. Enable custom line layout to edit the three-line address label.' });
+    setCustomLayout(false);
+    if (visualLayout && !visualElements.length && !labelBackground) setVisualLayout(false);
+    setStatus({ type: 'success', text: 'Sample records loaded. Enable custom line layout to edit the three-line address label.' });
   }
 
   function renderLine(template, record) {
