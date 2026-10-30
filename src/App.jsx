@@ -100,6 +100,35 @@ function normalizeSettings(value = {}) {
   return merged;
 }
 
+function getPageMetricsForSettings(settings) {
+  const presets = { A3: [297, 420], A4: [210, 297], A5: [148, 210], Letter: [215.9, 279.4], Legal: [215.9, 355.6] };
+  let [pageWidth, pageHeight] = settings.pageSize === 'Custom'
+    ? [Number(settings.customPageWidth), Number(settings.customPageHeight)]
+    : (presets[settings.pageSize] || presets.A4);
+  if (settings.orientation === 'landscape' && pageHeight > pageWidth) [pageWidth, pageHeight] = [pageHeight, pageWidth];
+  if (settings.orientation === 'portrait' && pageWidth > pageHeight) [pageWidth, pageHeight] = [pageHeight, pageWidth];
+  const columns = Math.max(1, Math.round(Number(settings.columns) || 1));
+  const rows = Math.max(1, Math.round(Number(settings.rows) || 1));
+  const labelWidth = Number(settings.labelWidth), labelHeight = Number(settings.labelHeight);
+  const gapX = Number(settings.gapX), gapY = Number(settings.gapY);
+  const printMarginTop = Number(settings.printMarginTop), printMarginSide = Number(settings.printMarginSide);
+  const printOffsetX = Number(settings.printOffsetX), printOffsetY = Number(settings.printOffsetY);
+  const valid = [pageWidth, pageHeight, labelWidth, labelHeight, gapX, gapY, printMarginTop, printMarginSide, printOffsetX, printOffsetY].every(Number.isFinite)
+    && pageWidth > 0 && pageHeight > 0 && labelWidth > 0 && labelHeight > 0
+    && gapX >= 0 && gapY >= 0 && printMarginTop >= 0 && printMarginSide >= 0;
+  const printableWidth = pageWidth - printMarginSide * 2;
+  const printableHeight = pageHeight - printMarginTop * 2;
+  const gridWidth = columns * labelWidth + (columns - 1) * gapX;
+  const gridHeight = rows * labelHeight + (rows - 1) * gapY;
+  const gridStartX = printMarginSide + (printableWidth - gridWidth) / 2 + printOffsetX;
+  const gridStartY = printMarginTop + printOffsetY;
+  const fitsWidth = valid && printableWidth > 0 && gridWidth <= printableWidth
+    && gridStartX >= printMarginSide - 0.001 && gridStartX + gridWidth <= pageWidth - printMarginSide + 0.001;
+  const fitsHeight = valid && printableHeight > 0 && gridHeight <= printableHeight
+    && gridStartY >= printMarginTop - 0.001 && gridStartY + gridHeight <= pageHeight - printMarginTop + 0.001;
+  return { valid, fits: fitsWidth && fitsHeight, pageWidth, pageHeight, printableWidth, printableHeight, gridWidth, gridHeight, gridStartX, gridStartY, printMarginTop, printMarginSide, printOffsetX, printOffsetY, fitsWidth, fitsHeight, columns, rows, perPage: columns * rows };
+}
+
 function readInitialProjectState() {
   const fallbackPage = { id: 'design-1', name: 'Design 1', visualElements: [], labelBackground: '', settings: defaults, visualLayout: true };
   const numberOr = (value, fallback) => Number.isFinite(Number(value)) ? Number(value) : fallback;
@@ -171,6 +200,9 @@ export default function App() {
   const [recordSearch, setRecordSearch] = useState('');
   const [recordPage, setRecordPage] = useState(0);
   const [printSelectionOnly, setPrintSelectionOnly] = useState(false);
+  const [printQueue, setPrintQueue] = useState(() => [{ id: 'queue-initial', designPageId: initialProject.activeDesignPageId, copies: 1, recordMode: 'all' }]);
+  const [queueDesignSelection, setQueueDesignSelection] = useState(() => initialProject.activeDesignPageId);
+  const [printRunJobs, setPrintRunJobs] = useState(null);
   const [printTestMode, setPrintTestMode] = useState(false);
   const [templateName, setTemplateName] = useState('');
   const [savedTemplates, setSavedTemplates] = useState(() => initialProject.templates);
@@ -192,39 +224,7 @@ export default function App() {
   const enabledFields = fields.filter(field => field.enabled);
   const perPage = Math.max(1, Math.round(Number(settings.columns) || 1) * Math.round(Number(settings.rows) || 1));
   const pages = useMemo(() => { const out = []; for (let i = 0; i < records.length; i += perPage) out.push(records.slice(i, i + perPage)); return out; }, [records, perPage]);
-  const pageMetrics = useMemo(() => {
-    const presets = { A3: [297, 420], A4: [210, 297], A5: [148, 210], Letter: [215.9, 279.4], Legal: [215.9, 355.6] };
-    let [pageWidth, pageHeight] = settings.pageSize === 'Custom'
-      ? [Number(settings.customPageWidth), Number(settings.customPageHeight)]
-      : (presets[settings.pageSize] || presets.A4);
-    if (settings.orientation === 'landscape' && pageHeight > pageWidth) [pageWidth, pageHeight] = [pageHeight, pageWidth];
-    if (settings.orientation === 'portrait' && pageWidth > pageHeight) [pageWidth, pageHeight] = [pageHeight, pageWidth];
-
-    const columns = Math.max(1, Math.round(Number(settings.columns) || 1));
-    const rows = Math.max(1, Math.round(Number(settings.rows) || 1));
-    const labelWidth = Number(settings.labelWidth);
-    const labelHeight = Number(settings.labelHeight);
-    const gapX = Number(settings.gapX);
-    const gapY = Number(settings.gapY);
-    const printMarginTop = Number(settings.printMarginTop);
-    const printMarginSide = Number(settings.printMarginSide);
-    const printOffsetX = Number(settings.printOffsetX);
-    const printOffsetY = Number(settings.printOffsetY);
-    const valid = [pageWidth, pageHeight, labelWidth, labelHeight, gapX, gapY, printMarginTop, printMarginSide, printOffsetX, printOffsetY].every(Number.isFinite)
-      && pageWidth > 0 && pageHeight > 0 && labelWidth > 0 && labelHeight > 0
-      && gapX >= 0 && gapY >= 0 && printMarginTop >= 0 && printMarginSide >= 0;
-    const printableWidth = pageWidth - printMarginSide * 2;
-    const printableHeight = pageHeight - printMarginTop * 2;
-    const gridWidth = columns * labelWidth + (columns - 1) * gapX;
-    const gridHeight = rows * labelHeight + (rows - 1) * gapY;
-    const gridStartX = printMarginSide + (printableWidth - gridWidth) / 2 + printOffsetX;
-    const gridStartY = printMarginTop + printOffsetY;
-    const fitsWidth = valid && printableWidth > 0 && gridWidth <= printableWidth
-      && gridStartX >= printMarginSide - 0.001 && gridStartX + gridWidth <= pageWidth - printMarginSide + 0.001;
-    const fitsHeight = valid && printableHeight > 0 && gridHeight <= printableHeight
-      && gridStartY >= printMarginTop - 0.001 && gridStartY + gridHeight <= pageHeight - printMarginTop + 0.001;
-    return { valid, fits: fitsWidth && fitsHeight, pageWidth, pageHeight, printableWidth, printableHeight, gridWidth, gridHeight, gridStartX, gridStartY, printMarginTop, printMarginSide, printOffsetX, printOffsetY, fitsWidth, fitsHeight };
-  }, [settings]);
+  const pageMetrics = useMemo(() => getPageMetricsForSettings(settings), [settings]);
   const previewRecords = records.slice(0, showAll ? 48 : 8);
   const hasLabelContent = visualLayout
     ? Boolean(labelBackground) || visualElements.some(element =>
@@ -242,6 +242,24 @@ export default function App() {
     for (let i = 0; i < printSource.length; i += perPage) out.push(printSource.slice(i, i + perPage));
     return out;
   }, [printSource, perPage]);
+  const currentDesignPages = useMemo(() => designPages.map(page => page.id === activeDesignPageId
+    ? { ...page, name: designPageName, visualElements, labelBackground, settings: normalizeSettings(settings), visualLayout }
+    : page), [designPages, activeDesignPageId, designPageName, visualElements, labelBackground, settings, visualLayout]);
+  const queuedPrintJobs = useMemo(() => printQueue.map(item => {
+    const design = currentDesignPages.find(page => page.id === item.designPageId);
+    if (!design) return { ...item, missing: true, name: 'Missing design', records: [], copies: 1 };
+    const designSettings = normalizeSettings(design.settings);
+    const metrics = getPageMetricsForSettings(designSettings);
+    const sourceRecords = item.recordMode === 'selected' ? selectedRecords : records;
+    const copies = Math.max(1, Math.min(50, Math.round(Number(item.copies) || 1)));
+    const content = design.visualLayout
+      ? Boolean(design.labelBackground) || (design.visualElements || []).some(element =>
+        ['rectangle', 'circle', 'line'].includes(element.type)
+        || (element.type === 'logo' && Boolean(element.imageSrc))
+        || Boolean(String(element.text ?? '').trim()))
+      : hasLabelContent;
+    return { ...item, design, settings: designSettings, metrics, name: design.name, records: sourceRecords, copies, content, sheetCount: Math.ceil(sourceRecords.length / metrics.perPage) * copies };
+  }), [printQueue, currentDesignPages, records, selectedRecords, hasLabelContent]);
   const matchingIndexes = useMemo(() => {
     const query = recordSearch.trim().toLowerCase();
     return records.map((_, index) => index).filter(index => !query || Object.values(records[index]).join(' ').toLowerCase().includes(query));
@@ -253,6 +271,9 @@ export default function App() {
   useEffect(() => {
     try { localStorage.setItem('label-generator-settings-v1', JSON.stringify(settings)); } catch { /* Storage may be disabled. */ }
   }, [settings]);
+  useEffect(() => {
+    try { localStorage.setItem('label-generator-print-queue-v1', JSON.stringify(printQueue)); } catch { /* Print queue can be recreated from the design pages. */ }
+  }, [printQueue]);
   useEffect(() => {
     try { localStorage.setItem('label-generator-templates-v1', JSON.stringify(savedTemplates)); } catch { /* Storage may be disabled. */ }
   }, [savedTemplates]);
@@ -278,8 +299,12 @@ export default function App() {
     if (settings.orientation === 'portrait' && w > h) [w, h] = [h, w];
     let style = document.getElementById('label-page-rule');
     if (!style) { style = document.createElement('style'); style.id = 'label-page-rule'; document.head.appendChild(style); }
-    style.textContent = '@media print { @page { size: ' + w + 'mm ' + h + 'mm; margin: ' + Number(settings.printMarginTop || 0) + 'mm ' + Number(settings.printMarginSide || 0) + 'mm; } }';
-  }, [settings.pageSize, settings.orientation, settings.customPageWidth, settings.customPageHeight, settings.printMarginTop, settings.printMarginSide]);
+    const namedPages = queuedPrintJobs.filter(job => job.design && job.metrics?.valid).map((job, index) => {
+      const pageName = 'label_sheet_' + String(job.id).replace(/[^a-zA-Z0-9_-]/g, '_');
+      return '@page ' + pageName + ' { size: ' + job.metrics.pageWidth + 'mm ' + job.metrics.pageHeight + 'mm; margin: ' + job.settings.printMarginTop + 'mm ' + job.settings.printMarginSide + 'mm; }';
+    }).join(' ');
+    style.textContent = '@media print { @page { size: ' + w + 'mm ' + h + 'mm; margin: ' + Number(settings.printMarginTop || 0) + 'mm ' + Number(settings.printMarginSide || 0) + 'mm; } ' + namedPages + ' }';
+  }, [settings.pageSize, settings.orientation, settings.customPageWidth, settings.customPageHeight, settings.printMarginTop, settings.printMarginSide, queuedPrintJobs]);
 
   function applyWorksheet(book, sheetName, sourceName, XLSX) {
     const sheet = book.Sheets[sheetName];
@@ -383,9 +408,11 @@ export default function App() {
     setLines(old => { const copy = [...old]; const [item] = copy.splice(from, 1); copy.splice(to, 0, item); return copy; });
   }
   function toggleField(id) { setFields(old => old.map(field => field.id === id ? { ...field, enabled: !field.enabled } : field)); }
-  function getLabelLines(record) {
-    if (visualLayout) {
-      return visualElements
+  function getLabelLines(record, designOverride = null) {
+    const activeVisualLayout = designOverride?.visualLayout ?? visualLayout;
+    const activeVisualElements = designOverride?.visualElements ?? visualElements;
+    if (activeVisualLayout) {
+      return activeVisualElements
         .filter(element => ['text', 'qr', 'barcode'].includes(element.type))
         .map(element => ({
           id: element.id,
@@ -592,10 +619,13 @@ export default function App() {
     } catch(error) {setStatus({type:'error',text:error.message||'Could not process logo image.'});}
   }
 
-  function renderLabel(record, editing = false) {
-    if(visualLayout) return <div className="label visual-label">
-      {labelBackground && <img className="label-background" src={labelBackground} alt="" draggable="false"/>}
-      {visualElements.map(element=>{
+  function renderLabel(record, editing = false, designOverride = null) {
+    const activeVisualLayout = designOverride?.visualLayout ?? visualLayout;
+    const activeVisualElements = designOverride?.visualElements ?? visualElements;
+    const activeLabelBackground = designOverride?.labelBackground ?? labelBackground;
+    if(activeVisualLayout) return <div className="label visual-label">
+      {activeLabelBackground && <img className="label-background" src={activeLabelBackground} alt="" draggable="false"/>}
+      {activeVisualElements.map(element=>{
         const isShape=['rectangle','circle','line'].includes(element.type);
         const text=element.type==='logo'?element.text:renderLine(element.text,record);
         if(!text&&!isShape) return null;
@@ -639,11 +669,63 @@ export default function App() {
     if (!pageMetrics.fits) { setStatus({ type: 'error', text: 'The label grid (' + pageMetrics.gridWidth.toFixed(1) + ' × ' + pageMetrics.gridHeight.toFixed(1) + ' mm) exceeds the printable area (' + pageMetrics.printableWidth.toFixed(1) + ' × ' + pageMetrics.printableHeight.toFixed(1) + ' mm). Reduce the label size, rows, columns or gaps before printing.' }); return false; }
     return true;
   }
+  function addDesignToPrintQueue() {
+    const design = currentDesignPages.find(page => page.id === queueDesignSelection);
+    if (!design) { setStatus({ type: 'error', text: 'Choose an available design page first.' }); return; }
+    setPrintQueue(old => [...old, { id: 'queue-' + Date.now(), designPageId: design.id, copies: 1, recordMode: 'all' }]);
+    setStatus({ type: 'success', text: '"' + design.name + '" added to the print queue.' });
+  }
+  function updatePrintQueueItem(id, patch) {
+    setPrintQueue(old => old.map(item => item.id === id ? { ...item, ...patch } : item));
+  }
+  function movePrintQueueItem(index, delta) {
+    setPrintQueue(old => {
+      const target = index + delta;
+      if (target < 0 || target >= old.length) return old;
+      const next = [...old];
+      [next[index], next[target]] = [next[target], next[index]];
+      return next;
+    });
+  }
+  function validatePrintJobs(jobs) {
+    if (!jobs.length) { setStatus({ type: 'error', text: 'Add at least one design to the print queue.' }); return false; }
+    for (const job of jobs) {
+      if (job.missing) { setStatus({ type: 'error', text: 'A queued design is no longer available. Remove it and add a valid design.' }); return false; }
+      if (!job.records.length) { setStatus({ type: 'error', text: 'No records are available for "' + job.name + '". Check its all/selected record setting.' }); return false; }
+      if (!job.content) { setStatus({ type: 'error', text: 'The design "' + job.name + '" has no printable label content.' }); return false; }
+      if (!job.metrics.valid || !job.metrics.fits) { setStatus({ type: 'error', text: 'The layout for "' + job.name + '" does not fit its configured paper. Adjust that design page before printing.' }); return false; }
+    }
+    return true;
+  }
+  function printQueuedDesigns() {
+    if (!validatePrintJobs(queuedPrintJobs)) return;
+    setPrintRunJobs(queuedPrintJobs);
+    window.setTimeout(() => {
+      window.addEventListener('afterprint', () => setPrintRunJobs(null), { once: true });
+      window.print();
+    }, 120);
+  }
   function printLabels(mode = 'all') {
     const source = mode === 'selected' ? selectedRecords : records;
     if (!validateForOutput(source)) return;
+    const design = currentDesignPages.find(page => page.id === activeDesignPageId);
+    const directJob = [{
+      id: 'direct-' + activeDesignPageId,
+      design,
+      settings: normalizeSettings(design?.settings || settings),
+      metrics: getPageMetricsForSettings(normalizeSettings(design?.settings || settings)),
+      records: source,
+      copies: 1,
+      name: design?.name || 'Current design',
+      content: hasLabelContent
+    }];
     setPrintSelectionOnly(mode === 'selected');
-    window.setTimeout(() => window.print(), 80);
+    if (!validatePrintJobs(directJob)) return;
+    setPrintRunJobs(directJob);
+    window.setTimeout(() => {
+      window.addEventListener('afterprint', () => setPrintRunJobs(null), { once: true });
+      window.print();
+    }, 120);
   }
   function printCalibrationTest() {
     if (!pageMetrics.valid || !pageMetrics.fits) {
@@ -679,6 +761,9 @@ export default function App() {
   async function exportPdf(mode = 'all') {
     const source = mode === 'selected' ? selectedRecords : records;
     if (!validateForOutput(source)) return;
+    const activeDesign = currentDesignPages.find(page => page.id === activeDesignPageId) || { visualLayout, visualElements, labelBackground, settings };
+    const directJob = [{ id: 'pdf-' + activeDesignPageId, design: activeDesign, settings: normalizeSettings(activeDesign.settings || settings), metrics: getPageMetricsForSettings(normalizeSettings(activeDesign.settings || settings)), records: source, copies: 1, name: activeDesign.name || 'Current design', content: hasLabelContent }];
+    if (!validatePrintJobs(directJob)) return;
     try {
       const { jsPDF } = await import('jspdf');
       const pageWidth = pageMetrics.pageWidth;
