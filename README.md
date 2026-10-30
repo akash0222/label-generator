@@ -27,6 +27,12 @@ npm run preview
 - Choose portrait or landscape orientation.
 - Configure label dimensions, rows, columns, gaps, alignment, font size, and padding.
 - Live preview, printable-area validation, and multi-page printing.
+- Save and reuse named label templates in the browser.
+- Export generated labels directly to PDF or Excel.
+- Drag the line-number handle to reorder custom label lines.
+- Switch between worksheets in a multi-sheet workbook.
+- Select individual records for printing and exports.
+- Persist page and label settings between visits.
 - Spreadsheet parser pinned to the patched SheetJS 0.20.3 distribution.
 
 ## Example address label
@@ -38,6 +44,14 @@ Mo. {@Mobile No}, {@Father Phone no:}
 ```
 
 The designer is generic. Users can combine any available columns and fixed text to create student labels, postal address labels, inventory labels, event badges, and more.
+
+## Saved templates and browser settings
+
+Templates and page/label settings are stored in the current browser using local storage. They are not synced across devices or browsers and are removed if the browser's site data is cleared.
+
+## Exports
+
+PDF export creates a downloadable PDF using the configured paper size, label dimensions, rows, columns, gaps, and alignment. Excel export creates a workbook with one row per generated label, its individual text lines, and a combined label text column.
 
 ## Printing
 
