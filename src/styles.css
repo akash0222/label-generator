@@ -115,3 +115,29 @@
 @media(max-width:1050px){.design-pages-toolbar{grid-template-columns:1fr 1fr 1fr}.design-pages-heading{grid-column:1/-1}}
 @media(max-width:650px){.design-pages-toolbar{grid-template-columns:1fr 1fr}.design-pages-heading{grid-column:1/-1}.starter-library>div{flex-basis:100%}}
 @media print{.design-pages-toolbar,.starter-library{display:none!important}}
+
+
+/* Unified four-stage workflow */
+.workflow-nav{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin:0 0 16px;padding:8px;background:#fff;border:1px solid #e8ecf3;border-radius:12px;box-shadow:0 4px 18px #23365b08}
+.workflow-nav button{display:flex;align-items:center;gap:9px;min-width:0;padding:10px 12px;border:0;border-radius:8px;background:transparent;color:#34435d;text-align:left;cursor:pointer}
+.workflow-nav button:hover{background:#f3f6fd}
+.workflow-nav button>span{display:grid;place-items:center;flex:0 0 28px;height:28px;border-radius:8px;background:#edf2ff;color:#315cce;font-size:10px;font-weight:800}
+.workflow-nav strong,.workflow-nav small{display:block}
+.workflow-nav strong{font-size:11px;font-weight:800}
+.workflow-nav small{margin-top:2px;color:#8490a2;font-size:9px}
+#step-data,#step-design,#step-print-layout,#step-export,#label-preview{scroll-margin-top:14px}
+
+/* Shared print calibration for browser printing and PDF export */
+.print-calibration{margin-top:15px;padding:13px;border:1px solid #e5ebf5;border-radius:9px;background:#fbfcff}
+.print-calibration-heading strong,.print-calibration-heading span{display:block}
+.print-calibration-heading strong{font-size:11px;color:#34435d}
+.print-calibration-heading span{margin-top:4px;font-size:10px;line-height:1.5;color:#8490a2}
+.calibration-grid{margin-top:12px}
+.calibration-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.print-grid{transform:translate(var(--print-offset-x,0mm),var(--print-offset-y,0mm));transform-origin:top left}
+.calibration-grid-output .calibration-label{position:relative!important;display:flex!important;align-items:center!important;justify-content:center!important;border:.2mm dashed #64748b!important;background:transparent!important;color:#64748b!important;font:7pt Arial,sans-serif!important;print-color-adjust:exact;-webkit-print-color-adjust:exact}
+.calibration-label i{position:absolute;left:50%;top:50%;width:4mm;height:4mm;transform:translate(-50%,-50%);border-left:.2mm solid #64748b;border-top:.2mm solid #64748b}
+.calibration-label span{position:absolute;left:1mm;top:1mm;font-size:6pt}
+@media print{.workflow-nav{display:none!important}}
+@media(max-width:780px){.workflow-nav{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:480px){.workflow-nav button{padding:8px 7px;gap:6px}.workflow-nav button>span{flex-basis:25px;height:25px}.workflow-nav strong{font-size:10px}.workflow-nav small{font-size:8px}}
