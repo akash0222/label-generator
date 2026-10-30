@@ -1224,8 +1224,69 @@ export default function App() {
         : 'Enter valid page and label dimensions and non-negative gaps.'}
     </div><div className="settings-footer"><span><b>{perPage}</b> labels per page · <b>{pages.length}</b> page(s)</span><button className="text-button" onClick={resetSettings}><RotateCcw size={14}/> Reset settings</button></div></section></div>
 
+    <section id="print-queue" className="panel print-queue-panel">
+      <div className="section-title">
+        <span className="step">05</span>
+        <div><h2>Multi-design print manager</h2><p>Combine different saved label designs in one batch. Each design keeps its own paper size, label grid and calibration.</p></div>
+        <span className="selected-count">{queuedPrintJobs.length} queued</span>
+      </div>
+      <div className="print-queue-add">
+        <label>Choose a saved design
+          <select value={queueDesignSelection} onChange={e => setQueueDesignSelection(e.target.value)}>
+            {currentDesignPages.map((page, index) => <option key={page.id} value={page.id}>{index + 1}. {page.name || 'Untitled design'}</option>)}
+          </select>
+        </label>
+        <button className="button primary" onClick={addDesignToPrintQueue}><Plus size={15}/> Add to print queue</button>
+      </div>
+      {!queuedPrintJobs.length ? <div className="empty">Your print queue is empty. Add one or more saved designs to prepare a mixed batch.</div> : <div className="print-queue-list">
+        {queuedPrintJobs.map((job, index) => (
+          <div className={'print-queue-item' + (job.missing || !job.metrics?.fits || !job.content || !job.records.length ? ' has-issue' : '')} key={job.id}>
+            <div className="print-queue-number">{String(index + 1).padStart(2, '0')}</div>
+            <div className="print-queue-details">
+              <strong>{job.name}</strong>
+              <small>{job.missing ? 'This design page was deleted.' : job.metrics?.valid ? job.metrics.pageWidth + ' × ' + job.metrics.pageHeight + ' mm · ' + job.metrics.perPage + ' labels per sheet' : 'Invalid sheet settings'}</small>
+              <small>{job.records.length * job.copies} labels · {job.sheetCount || 0} sheet(s) · {job.recordMode === 'selected' ? 'Selected records' : 'All records'}</small>
+            </div>
+            <label className="queue-control">Design
+              <select value={job.designPageId} onChange={e => updatePrintQueueItem(job.id, { designPageId: e.target.value })}>
+                {currentDesignPages.map(page => <option key={page.id} value={page.id}>{page.name}</option>)}
+              </select>
+            </label>
+            <label className="queue-control">Records
+              <select value={job.recordMode} onChange={e => updatePrintQueueItem(job.id, { recordMode: e.target.value })}>
+                <option value="all">All records</option>
+                <option value="selected">Selected records</option>
+              </select>
+            </label>
+            <label className="queue-control quantity-control">Copies
+              <input type="number" min="1" max="50" step="1" value={job.copies} onChange={e => updatePrintQueueItem(job.id, { copies: Math.max(1, Math.min(50, Math.round(Number(e.target.value) || 1))) })}/>
+            </label>
+            <div className="queue-item-actions">
+              <button type="button" className="icon-button" title="Move design up" aria-label="Move design up" disabled={index === 0} onClick={() => movePrintQueueItem(index, -1)}>↑</button>
+              <button type="button" className="icon-button" title="Move design down" aria-label="Move design down" disabled={index === queuedPrintJobs.length - 1} onClick={() => movePrintQueueItem(index, 1)}>↓</button>
+              <button type="button" className="icon-button delete" title="Remove from print queue" aria-label="Remove from print queue" onClick={() => setPrintQueue(old => old.filter(item => item.id !== job.id))}><Trash2 size={14}/></button>
+            </div>
+            {job.missing || !job.metrics?.valid || !job.metrics?.fits || !job.content || !job.records.length
+              ? <span className="queue-warning">{job.missing ? 'Design unavailable' : !job.metrics?.fits ? 'Sheet does not fit' : !job.content ? 'No label content' : 'No records for this scope'}</span>
+              : <span className="queue-ready"><Check size={13}/> Ready</span>}
+          </div>
+        ))}
+      </div>}
+      <div className="print-queue-summary">
+        <div><strong>{queuedPrintJobs.reduce((sum, job) => sum + job.records.length * job.copies, 0)}</strong><span>Labels in batch</span></div>
+        <div><strong>{queuedPrintJobs.reduce((sum, job) => sum + (job.sheetCount || 0), 0)}</strong><span>Print sheets</span></div>
+        <div><strong>{new Set(queuedPrintJobs.map(job => job.designPageId)).size}</strong><span>Designs</span></div>
+        <div className="print-queue-actions">
+          <button className="button outline" onClick={() => setPrintQueue([])} disabled={!printQueue.length}>Clear queue</button>
+          <button className="button secondary" onClick={() => exportPdf('queue')} disabled={!queuedPrintJobs.length}><FileSpreadsheet size={15}/> Export batch PDF</button>
+          <button className="button primary" onClick={printQueuedDesigns} disabled={!queuedPrintJobs.length}><Printer size={15}/> Print batch</button>
+        </div>
+      </div>
+      <p className="hint">Copies repeat the full record set for that design. Mixed batches can contain designs with different page sizes; choose 100% / Actual Size in the print dialog.</p>
+    </section>
+
     <section id="step-export" className="panel records-panel">
-      <div className="section-title"><span className="step">05</span><div><h2>Select records to print</h2><p>Choose individual rows or print all records from the current worksheet.</p></div><span className="selected-count">{selectedIndexes.length} / {records.length} selected</span></div>
+      <div className="section-title"><span className="step">07</span><div><h2>Select records to print</h2><p>Choose individual rows or print all records from the current worksheet.</p></div><span className="selected-count">{selectedIndexes.length} / {records.length} selected</span></div>
       <div className="record-toolbar">
         <input type="search" value={recordSearch} onChange={e => { setRecordSearch(e.target.value); setRecordPage(0); }} placeholder="Search names, registration numbers or any Excel value…"/>
         <button className="text-button" onClick={selectAllRecords} disabled={!records.length}>Select all</button>
