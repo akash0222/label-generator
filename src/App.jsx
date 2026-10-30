@@ -899,7 +899,7 @@ export default function App() {
       <div className="upload-zone" onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); loadFile(e.dataTransfer.files?.[0]); }} onClick={() => fileRef.current?.click()}><input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" hidden onChange={e => { const file = e.currentTarget.files?.[0]; e.currentTarget.value = ''; loadFile(file); }}/><Upload size={23}/><div><b>Choose an Excel file</b><span> or drag and drop it here<small>Supported formats: XLSX, XLS and CSV</small></span></div><button className="button outline" type="button">Browse files</button></div>
       {fileName && <div className="file-chip"><FileSpreadsheet size={15}/>{fileName}<b>{records.length} records</b></div>}
       {sheetNames.length > 1 && <label className="worksheet-picker">Worksheet<select value={selectedSheet} onChange={e => changeWorksheet(e.target.value)}>{sheetNames.map(name => <option key={name} value={name}>{name}</option>)}</select></label>}
-      <div className={'status ' + status.type}>{status.type === 'error' ? <AlertCircle size={15}/> : <Check size={15}/>} {status.text}</div>
+      <div className={'status ' + status.type}>{status.type === 'success' ? <Check size={15}/> : <AlertCircle size={15}/>} {status.text}</div>
     </section>
 
     <section id="step-design" className="panel designer-panel"><div className="section-title"><span className="step">02</span><div><h2>Custom label line designer</h2><p>Combine any Excel columns and fixed text into the exact lines you want.</p></div><label className="toggle"><input type="checkbox" checked={customLayout} onChange={e => setCustomLayout(e.target.checked)}/> Use custom line layout</label></div>
@@ -1038,8 +1038,8 @@ export default function App() {
     <div className="print-calibration">
       <div className="print-calibration-heading"><strong>Print alignment & calibration</strong><span>Match your printer's printable area and compensate for small feed offsets. All measurements are in millimetres.</span></div>
       <div className="settings-grid calibration-grid">
-        <label>Top print margin (mm)<input type="number" min="0" max="40" step="0.1" value={settings.printMarginTop} onChange={e => setSetting('printMarginTop', Math.max(0, Number(e.target.value) || 0))}/></label>
-        <label>Side print margin (mm)<input type="number" min="0" max="40" step="0.1" value={settings.printMarginSide} onChange={e => setSetting('printMarginSide', Math.max(0, Number(e.target.value) || 0))}/></label>
+        <label>Vertical page margin — top & bottom (mm)<input type="number" min="0" max="40" step="0.1" value={settings.printMarginTop} onChange={e => setSetting('printMarginTop', Math.max(0, Number(e.target.value) || 0))}/></label>
+        <label>Horizontal page margin — left & right (mm)<input type="number" min="0" max="40" step="0.1" value={settings.printMarginSide} onChange={e => setSetting('printMarginSide', Math.max(0, Number(e.target.value) || 0))}/></label>
         <label>Horizontal offset X (mm)<input type="number" step="0.1" value={settings.printOffsetX} onChange={e => setSetting('printOffsetX', Number(e.target.value) || 0)}/></label>
         <label>Vertical offset Y (mm)<input type="number" step="0.1" value={settings.printOffsetY} onChange={e => setSetting('printOffsetY', Number(e.target.value) || 0)}/></label>
       </div>
