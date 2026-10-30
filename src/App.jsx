@@ -200,7 +200,17 @@ export default function App() {
   const [recordSearch, setRecordSearch] = useState('');
   const [recordPage, setRecordPage] = useState(0);
   const [printSelectionOnly, setPrintSelectionOnly] = useState(false);
-  const [printQueue, setPrintQueue] = useState(() => [{ id: 'queue-initial', designPageId: initialProject.activeDesignPageId, copies: 1, recordMode: 'all' }]);
+  const [printQueue, setPrintQueue] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('label-generator-print-queue-v1') || 'null');
+      if (Array.isArray(saved)) return saved.filter(item => item && item.id && item.designPageId).map(item => ({
+        id: String(item.id), designPageId: String(item.designPageId),
+        copies: Math.max(1, Math.min(50, Math.round(Number(item.copies) || 1))),
+        recordMode: item.recordMode === 'selected' ? 'selected' : 'all'
+      }));
+    } catch { /* Start with the active design when queue storage is unavailable. */ }
+    return [{ id: 'queue-initial', designPageId: initialProject.activeDesignPageId, copies: 1, recordMode: 'all' }];
+  });
   const [queueDesignSelection, setQueueDesignSelection] = useState(() => initialProject.activeDesignPageId);
   const [printRunJobs, setPrintRunJobs] = useState(null);
   const [printTestMode, setPrintTestMode] = useState(false);
@@ -260,6 +270,28 @@ export default function App() {
       : hasLabelContent;
     return { ...item, design, settings: designSettings, metrics, name: design.name, records: sourceRecords, copies, content, sheetCount: Math.ceil(sourceRecords.length / metrics.perPage) * copies };
   }), [printQueue, currentDesignPages, records, selectedRecords, hasLabelContent]);
+  const printSheets = useMemo(() => {
+    if (!printRunJobs?.length) return [];
+    const output = [];
+    for (const job of printRunJobs) {
+      const metrics = job.metrics;
+      const pageName = 'label_sheet_' + String(job.id).replace(/[^a-zA-Z0-9_-]/g, '_');
+      let pageIndex = 0;
+      for (let copyIndex = 0; copyIndex < job.copies; copyIndex += 1) {
+        for (let start = 0; start < job.records.length; start += metrics.perPage) {
+          output.push({
+            id: job.id + '-copy-' + copyIndex + '-page-' + pageIndex,
+            pageName,
+            job,
+            records: job.records.slice(start, start + metrics.perPage),
+            copyIndex,
+            pageIndex: pageIndex++
+          });
+        }
+      }
+    }
+    return output;
+  }, [printRunJobs]);
   const matchingIndexes = useMemo(() => {
     const query = recordSearch.trim().toLowerCase();
     return records.map((_, index) => index).filter(index => !query || Object.values(records[index]).join(' ').toLowerCase().includes(query));
@@ -299,12 +331,13 @@ export default function App() {
     if (settings.orientation === 'portrait' && w > h) [w, h] = [h, w];
     let style = document.getElementById('label-page-rule');
     if (!style) { style = document.createElement('style'); style.id = 'label-page-rule'; document.head.appendChild(style); }
-    const namedPages = queuedPrintJobs.filter(job => job.design && job.metrics?.valid).map((job, index) => {
+    const pageJobs = [...queuedPrintJobs, ...(printRunJobs || [])];
+    const namedPages = pageJobs.filter(job => job.design && job.metrics?.valid).map(job => {
       const pageName = 'label_sheet_' + String(job.id).replace(/[^a-zA-Z0-9_-]/g, '_');
       return '@page ' + pageName + ' { size: ' + job.metrics.pageWidth + 'mm ' + job.metrics.pageHeight + 'mm; margin: ' + job.settings.printMarginTop + 'mm ' + job.settings.printMarginSide + 'mm; }';
     }).join(' ');
     style.textContent = '@media print { @page { size: ' + w + 'mm ' + h + 'mm; margin: ' + Number(settings.printMarginTop || 0) + 'mm ' + Number(settings.printMarginSide || 0) + 'mm; } ' + namedPages + ' }';
-  }, [settings.pageSize, settings.orientation, settings.customPageWidth, settings.customPageHeight, settings.printMarginTop, settings.printMarginSide, queuedPrintJobs]);
+  }, [settings.pageSize, settings.orientation, settings.customPageWidth, settings.customPageHeight, settings.printMarginTop, settings.printMarginSide, queuedPrintJobs, printRunJobs]);
 
   function applyWorksheet(book, sheetName, sourceName, XLSX) {
     const sheet = book.Sheets[sheetName];
@@ -1172,7 +1205,30 @@ export default function App() {
     <div className="print-document">
       {printTestMode
         ? <div className="print-page"><div className="print-grid calibration-grid-output">{Array.from({ length: perPage }).map((_, index) => <div className="label calibration-label" key={index}><span>ALIGN {index + 1}</span><i aria-hidden="true"/></div>)}</div></div>
-        : printPages.map((page, index) => <div className="print-page" key={index}><div className="print-grid">{page.map((record, i) => <React.Fragment key={i}>{renderLabel(record)}</React.Fragment>)}{Array.from({ length: Math.max(0, perPage - page.length) }).map((_, i) => <div className="label blank" key={'blank' + i}/>)}</div></div>)}
+        : printRunJobs?.length
+          ? printSheets.map(sheet => {
+            const job = sheet.job, design = job.design, cfg = job.settings, metrics = job.metrics;
+            const pageName = sheet.pageName;
+            const printVars = {
+              page: pageName,
+              '--columns': cfg.columns, '--rows': cfg.rows,
+              '--label-width': cfg.labelWidth + 'mm', '--label-height': cfg.labelHeight + 'mm',
+              '--gap-x': cfg.gapX + 'mm', '--gap-y': cfg.gapY + 'mm',
+              '--label-padding': cfg.padding + 'mm', '--font-size': cfg.fontSize + 'pt',
+              '--line-gap': cfg.lineGap + 'mm',
+              '--h-align': cfg.alignment === 'left' ? 'flex-start' : cfg.alignment === 'right' ? 'flex-end' : 'center',
+              '--text-align': cfg.alignment,
+              '--v-align': cfg.vertical === 'top' ? 'flex-start' : cfg.vertical === 'bottom' ? 'flex-end' : 'center',
+              '--print-offset-x': cfg.printOffsetX + 'mm', '--print-offset-y': cfg.printOffsetY + 'mm'
+            };
+            return <div className="print-page mixed-print-page" key={sheet.id} style={printVars}>
+              <div className="print-grid">
+                {sheet.records.map((record, index) => <React.Fragment key={index}>{renderLabel(record, false, design)}</React.Fragment>)}
+                {Array.from({ length: Math.max(0, metrics.perPage - sheet.records.length) }).map((_, index) => <div className="label blank" key={'blank-' + index}/>)}
+              </div>
+            </div>;
+          })
+          : printPages.map((page, index) => <div className="print-page" key={index}><div className="print-grid">{page.map((record, i) => <React.Fragment key={i}>{renderLabel(record)}</React.Fragment>)}{Array.from({ length: Math.max(0, perPage - page.length) }).map((_, i) => <div className="label blank" key={'blank' + i}/>)}</div></div>)}
     </div>
   </main>;
 }
