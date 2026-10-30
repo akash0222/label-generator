@@ -7,7 +7,7 @@ const sampleRows = [
   { 'Student Name': 'Abhay Pratap Singh', 'Reg No': '2412158', Salutation: 'Mr.', Gender: 'Male', 'Father Name': 'Vijendra Singh', Address: 'Sample House, Sector 10', City: 'Noida', State: 'Uttar Pradesh', Pincode: '201301', 'Mobile No': '9876543210', 'Father Phone no:': '9876501234' }
 ];
 const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
-const defaults = { pageSize: 'A4', orientation: 'portrait', customPageWidth: 210, customPageHeight: 297, labelWidth: 99.1, labelHeight: 33.9, columns: 2, rows: 8, gapX: 2, gapY: 0, padding: 3, fontSize: 11, lineGap: 1.5, alignment: 'center', vertical: 'center' };
+const defaults = { pageSize: 'A4', orientation: 'portrait', customPageWidth: 210, customPageHeight: 297, labelWidth: 99.1, labelHeight: 33.9, columns: 2, rows: 8, gapX: 2, gapY: 0, padding: 3, fontSize: 11, lineGap: 1.5, alignment: 'center', vertical: 'center', printMarginTop: 12, printMarginSide: 3, printOffsetX: 0, printOffsetY: 0 };
 const norm = value => String(value ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
 const getValue = (record, heading) => { const key = Object.keys(record).find(item => norm(item) === norm(heading)); return key ? String(record[key] ?? '').trim() : ''; };
 
@@ -95,6 +95,7 @@ export default function App() {
   const [recordSearch, setRecordSearch] = useState('');
   const [recordPage, setRecordPage] = useState(0);
   const [printSelectionOnly, setPrintSelectionOnly] = useState(false);
+  const [printTestMode, setPrintTestMode] = useState(false);
   const [templateName, setTemplateName] = useState('');
   const [savedTemplates, setSavedTemplates] = useState(() => {
     try { return JSON.parse(localStorage.getItem('label-generator-templates-v1')) || []; }
@@ -136,15 +137,24 @@ export default function App() {
     const labelHeight = Number(settings.labelHeight);
     const gapX = Number(settings.gapX);
     const gapY = Number(settings.gapY);
-    const valid = [pageWidth, pageHeight, labelWidth, labelHeight, gapX, gapY].every(Number.isFinite)
-      && pageWidth > 0 && pageHeight > 0 && labelWidth > 0 && labelHeight > 0 && gapX >= 0 && gapY >= 0;
-    const printableWidth = pageWidth - 6;
-    const printableHeight = pageHeight - 24;
+    const printMarginTop = Number(settings.printMarginTop);
+    const printMarginSide = Number(settings.printMarginSide);
+    const printOffsetX = Number(settings.printOffsetX);
+    const printOffsetY = Number(settings.printOffsetY);
+    const valid = [pageWidth, pageHeight, labelWidth, labelHeight, gapX, gapY, printMarginTop, printMarginSide, printOffsetX, printOffsetY].every(Number.isFinite)
+      && pageWidth > 0 && pageHeight > 0 && labelWidth > 0 && labelHeight > 0
+      && gapX >= 0 && gapY >= 0 && printMarginTop >= 0 && printMarginSide >= 0;
+    const printableWidth = pageWidth - printMarginSide * 2;
+    const printableHeight = pageHeight - printMarginTop * 2;
     const gridWidth = columns * labelWidth + (columns - 1) * gapX;
     const gridHeight = rows * labelHeight + (rows - 1) * gapY;
-    const fitsWidth = valid && gridWidth <= printableWidth;
-    const fitsHeight = valid && gridHeight <= printableHeight;
-    return { valid, fits: fitsWidth && fitsHeight, pageWidth, pageHeight, printableWidth, printableHeight, gridWidth, gridHeight, fitsWidth, fitsHeight };
+    const gridStartX = printMarginSide + (printableWidth - gridWidth) / 2 + printOffsetX;
+    const gridStartY = printMarginTop + printOffsetY;
+    const fitsWidth = valid && printableWidth > 0 && gridWidth <= printableWidth
+      && gridStartX >= printMarginSide - 0.001 && gridStartX + gridWidth <= pageWidth - printMarginSide + 0.001;
+    const fitsHeight = valid && printableHeight > 0 && gridHeight <= printableHeight
+      && gridStartY >= printMarginTop - 0.001 && gridStartY + gridHeight <= pageHeight - printMarginTop + 0.001;
+    return { valid, fits: fitsWidth && fitsHeight, pageWidth, pageHeight, printableWidth, printableHeight, gridWidth, gridHeight, gridStartX, gridStartY, printMarginTop, printMarginSide, printOffsetX, printOffsetY, fitsWidth, fitsHeight };
   }, [settings]);
   const previewRecords = records.slice(0, showAll ? 48 : 8);
   const setSetting = (key, value) => setSettings(old => ({ ...old, [key]: value }));
@@ -187,8 +197,8 @@ export default function App() {
     if (settings.orientation === 'portrait' && w > h) [w, h] = [h, w];
     let style = document.getElementById('label-page-rule');
     if (!style) { style = document.createElement('style'); style.id = 'label-page-rule'; document.head.appendChild(style); }
-    style.textContent = '@media print { @page { size: ' + w + 'mm ' + h + 'mm; margin: 12mm 3mm; } }';
-  }, [settings.pageSize, settings.orientation, settings.customPageWidth, settings.customPageHeight]);
+    style.textContent = '@media print { @page { size: ' + w + 'mm ' + h + 'mm; margin: ' + Number(settings.printMarginTop || 0) + 'mm ' + Number(settings.printMarginSide || 0) + 'mm; } }';
+  }, [settings.pageSize, settings.orientation, settings.customPageWidth, settings.customPageHeight, settings.printMarginTop, settings.printMarginSide]);
 
   function applyWorksheet(book, sheetName, sourceName, XLSX) {
     const sheet = book.Sheets[sheetName];
@@ -554,6 +564,18 @@ export default function App() {
     setPrintSelectionOnly(mode === 'selected');
     window.setTimeout(() => window.print(), 80);
   }
+  function printCalibrationTest() {
+    if (!pageMetrics.valid || !pageMetrics.fits) {
+      setStatus({ type: 'error', text: 'Adjust the paper, margins, label dimensions and offsets until the sheet fits before printing a calibration test.' });
+      return;
+    }
+    setPrintTestMode(true);
+    setStatus({ type: 'info', text: 'Calibration test ready. Print at 100% / Actual size with browser headers and footers disabled.' });
+    window.setTimeout(() => {
+      window.addEventListener('afterprint', () => setPrintTestMode(false), { once: true });
+      window.print();
+    }, 120);
+  }
   async function exportExcel(mode = 'all') {
     const source = mode === 'selected' ? selectedRecords : records;
     if (!validateForOutput(source)) return;
@@ -592,8 +614,8 @@ export default function App() {
       const fontSize = Number(settings.fontSize);
       const lineGap = Number(settings.lineGap);
       const gridWidth = columns * labelWidth + (columns - 1) * gapX;
-      const startX = (pageWidth - gridWidth) / 2;
-      const startY = 12;
+      const startX = pageMetrics.gridStartX;
+      const startY = pageMetrics.gridStartY;
       const fontHeight = fontSize * 0.3528;
       const lineHeight = fontHeight * 1.25;
       const contentWidth = Math.max(5, labelWidth - 2 * padding);
@@ -765,20 +787,28 @@ export default function App() {
     '--gap-x': settings.gapX + 'mm', '--gap-y': settings.gapY + 'mm', '--label-padding': settings.padding + 'mm',
     '--font-size': settings.fontSize + 'pt', '--line-gap': settings.lineGap + 'mm', '--rows': settings.rows,
     '--h-align': settings.alignment === 'left' ? 'flex-start' : settings.alignment === 'right' ? 'flex-end' : 'center',
-    '--text-align': settings.alignment, '--v-align': settings.vertical === 'top' ? 'flex-start' : settings.vertical === 'bottom' ? 'flex-end' : 'center'
+    '--text-align': settings.alignment, '--v-align': settings.vertical === 'top' ? 'flex-start' : settings.vertical === 'bottom' ? 'flex-end' : 'center',
+    '--print-offset-x': Number(settings.printOffsetX || 0) + 'mm', '--print-offset-y': Number(settings.printOffsetY || 0) + 'mm'
   };
 
   return <main className="app" style={vars}>
     <header className="header"><div className="brand"><FileSpreadsheet size={23}/></div><div className="heading"><span className="eyebrow">PRINT DESIGN WORKSPACE</span><h1>Custom Labels Generator</h1><p>Turn any spreadsheet into print-ready labels.</p></div><div className="header-actions"><button className="button secondary" onClick={loadSample}>Load sample</button><button className="button outline" onClick={() => exportPdf('all')} disabled={!records.length}>Export PDF</button><button className="button outline" onClick={() => exportExcel('all')} disabled={!records.length}>Export Excel</button><button className="button primary" onClick={() => printLabels('all')}><Printer size={16}/> Print all</button></div></header>
 
-    <section className="panel upload-panel"><div className="section-title"><span className="step">01</span><div><h2>Upload your Excel file</h2><p>Upload .xlsx, .xls or .csv. Column headings are detected automatically.</p></div></div>
+    <nav className="workflow-nav" aria-label="Label production workflow">
+      <button type="button" onClick={() => document.getElementById('step-data')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}><span>01</span><strong>Import data</strong><small>Excel / CSV</small></button>
+      <button type="button" onClick={() => document.getElementById('step-design')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}><span>02</span><strong>Design label</strong><small>Canvas / fields</small></button>
+      <button type="button" onClick={() => document.getElementById('step-print-layout')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}><span>03</span><strong>Set up sheet</strong><small>Paper / alignment</small></button>
+      <button type="button" onClick={() => document.getElementById('step-export')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}><span>04</span><strong>Print & export</strong><small>Records / PDF</small></button>
+    </nav>
+
+    <section id="step-data" className="panel upload-panel"><div className="section-title"><span className="step">01</span><div><h2>Upload your Excel file</h2><p>Upload .xlsx, .xls or .csv. Column headings are detected automatically.</p></div></div>
       <div className="upload-zone" onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); loadFile(e.dataTransfer.files?.[0]); }} onClick={() => fileRef.current?.click()}><input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" hidden onChange={e => { const file = e.currentTarget.files?.[0]; e.currentTarget.value = ''; loadFile(file); }}/><Upload size={23}/><div><b>Choose an Excel file</b><span> or drag and drop it here<small>Supported formats: XLSX, XLS and CSV</small></span></div><button className="button outline" type="button">Browse files</button></div>
       {fileName && <div className="file-chip"><FileSpreadsheet size={15}/>{fileName}<b>{records.length} records</b></div>}
       {sheetNames.length > 1 && <label className="worksheet-picker">Worksheet<select value={selectedSheet} onChange={e => changeWorksheet(e.target.value)}>{sheetNames.map(name => <option key={name} value={name}>{name}</option>)}</select></label>}
       <div className={'status ' + status.type}>{status.type === 'error' ? <AlertCircle size={15}/> : <Check size={15}/>} {status.text}</div>
     </section>
 
-    <section className="panel designer-panel"><div className="section-title"><span className="step">02</span><div><h2>Custom label line designer</h2><p>Combine any Excel columns and fixed text into the exact lines you want.</p></div><label className="toggle"><input type="checkbox" checked={customLayout} onChange={e => setCustomLayout(e.target.checked)}/> Use custom line layout</label></div>
+    <section id="step-design" className="panel designer-panel"><div className="section-title"><span className="step">02</span><div><h2>Custom label line designer</h2><p>Combine any Excel columns and fixed text into the exact lines you want.</p></div><label className="toggle"><input type="checkbox" checked={customLayout} onChange={e => setCustomLayout(e.target.checked)}/> Use custom line layout</label></div>
       <div className="template-toolbar">
         <input value={templateName} onChange={e => setTemplateName(e.target.value)} placeholder="Template name (e.g. Student address)"/>
         <button className="button secondary" onClick={saveTemplate} disabled={!headers.length}>Save template</button>
@@ -902,7 +932,7 @@ export default function App() {
 
     <div className="columns-layout"><section className="panel fields-panel"><div className="section-title"><span className="step">03</span><div><h2>Choose label content</h2><p>Select fields for simple labels.</p></div><span className="selected-count">{enabledFields.length} selected</span></div>{!headers.length ? <div className="empty">Upload a spreadsheet to see its columns.</div> : <div className="field-list">{fields.map(field => <label className="field-item" key={field.id}><input type="checkbox" checked={field.enabled} onChange={() => toggleField(field.id)}/><span>{field.label}</span></label>)}</div>}</section>
 
-    <section className="panel settings-panel"><div className="section-title"><span className="step">04</span><div><h2>Page and label layout</h2><p>Set paper, label dimensions and typography.</p></div></div><div className="settings-grid">
+    <section id="step-print-layout" className="panel settings-panel"><div className="section-title"><span className="step">04</span><div><h2>Page and label layout</h2><p>Set paper, label dimensions and typography.</p></div></div><div className="settings-grid">
       <label>Page size<select value={settings.pageSize} onChange={e => setSetting('pageSize', e.target.value)}><option>A3</option><option>A4</option><option>A5</option><option>Letter</option><option>Legal</option><option value="Custom">Custom size</option></select></label>
       <label>Orientation<select value={settings.orientation} onChange={e => setSetting('orientation', e.target.value)}><option value="portrait">Portrait</option><option value="landscape">Landscape</option></select></label>
       {settings.pageSize === 'Custom' && <><label>Page width (mm)<input type="number" min="50" value={settings.customPageWidth} onChange={e => setSetting('customPageWidth', Number(e.target.value))}/></label><label>Page height (mm)<input type="number" min="50" value={settings.customPageHeight} onChange={e => setSetting('customPageHeight', Number(e.target.value))}/></label></>}
@@ -911,7 +941,21 @@ export default function App() {
       <label>Horizontal gap (mm)<input type="number" min="0" step="0.5" value={settings.gapX} onChange={e => setSetting('gapX', Number(e.target.value))}/></label><label>Vertical gap (mm)<input type="number" min="0" step="0.5" value={settings.gapY} onChange={e => setSetting('gapY', Number(e.target.value))}/></label>
       <label>Font size (pt)<input type="number" min="5" max="36" value={settings.fontSize} onChange={e => setSetting('fontSize', Number(e.target.value))}/></label><label>Inner padding (mm)<input type="number" min="0" max="20" step="0.5" value={settings.padding} onChange={e => setSetting('padding', Number(e.target.value))}/></label>
       <label>Horizontal alignment<select value={settings.alignment} onChange={e => setSetting('alignment', e.target.value)}><option value="left">Left</option><option value="center">Center</option><option value="right">Right</option></select></label><label>Vertical alignment<select value={settings.vertical} onChange={e => setSetting('vertical', e.target.value)}><option value="top">Top</option><option value="center">Center</option><option value="bottom">Bottom</option></select></label>
-    </div><div className={'layout-fit ' + (pageMetrics.fits ? 'fit-ok' : 'fit-warning')} role="status">
+    </div>
+    <div className="print-calibration">
+      <div className="print-calibration-heading"><strong>Print alignment & calibration</strong><span>Match your printer's printable area and compensate for small feed offsets. All measurements are in millimetres.</span></div>
+      <div className="settings-grid calibration-grid">
+        <label>Top print margin (mm)<input type="number" min="0" max="40" step="0.1" value={settings.printMarginTop} onChange={e => setSetting('printMarginTop', Math.max(0, Number(e.target.value) || 0))}/></label>
+        <label>Side print margin (mm)<input type="number" min="0" max="40" step="0.1" value={settings.printMarginSide} onChange={e => setSetting('printMarginSide', Math.max(0, Number(e.target.value) || 0))}/></label>
+        <label>Horizontal offset X (mm)<input type="number" step="0.1" value={settings.printOffsetX} onChange={e => setSetting('printOffsetX', Number(e.target.value) || 0)}/></label>
+        <label>Vertical offset Y (mm)<input type="number" step="0.1" value={settings.printOffsetY} onChange={e => setSetting('printOffsetY', Number(e.target.value) || 0)}/></label>
+      </div>
+      <div className="calibration-actions">
+        <button className="button outline" onClick={printCalibrationTest}>Print alignment test</button>
+        <button className="button secondary" onClick={() => { setSetting('printOffsetX', 0); setSetting('printOffsetY', 0); }}>Reset X/Y offsets</button>
+      </div>
+    </div>
+    <div className={'layout-fit ' + (pageMetrics.fits ? 'fit-ok' : 'fit-warning')} role="status">
       {pageMetrics.valid
         ? (pageMetrics.fits
           ? 'Label grid fits the selected page: ' + pageMetrics.gridWidth.toFixed(1) + ' × ' + pageMetrics.gridHeight.toFixed(1) + ' mm.'
@@ -919,7 +963,7 @@ export default function App() {
         : 'Enter valid page and label dimensions and non-negative gaps.'}
     </div><div className="settings-footer"><span><b>{perPage}</b> labels per page · <b>{pages.length}</b> page(s)</span><button className="text-button" onClick={resetSettings}><RotateCcw size={14}/> Reset settings</button></div></section></div>
 
-    <section className="panel records-panel">
+    <section id="step-export" className="panel records-panel">
       <div className="section-title"><span className="step">05</span><div><h2>Select records to print</h2><p>Choose individual rows or print all records from the current worksheet.</p></div><span className="selected-count">{selectedIndexes.length} / {records.length} selected</span></div>
       <div className="record-toolbar">
         <input type="search" value={recordSearch} onChange={e => { setRecordSearch(e.target.value); setRecordPage(0); }} placeholder="Search names, registration numbers or any Excel value…"/>
@@ -942,11 +986,15 @@ export default function App() {
       </div>
     </section>
 
-    <section className="panel preview-panel"><div className="section-title"><span className="step">06</span><div><h2>Live label preview</h2><p>Preview updates as you change content and layout, including visual element positions.</p></div><span className="live-tag"><Eye size={14}/> LIVE PREVIEW</span><button className="button outline print-button" onClick={() => exportPdf('all')}><FileSpreadsheet size={15}/> PDF</button><button className="button primary print-button" onClick={() => printLabels('all')}><Printer size={15}/> Print all</button></div>
+    <section id="label-preview" className="panel preview-panel"><div className="section-title"><span className="step">06</span><div><h2>Live label preview</h2><p>Preview updates as you change content and layout, including visual element positions.</p></div><span className="live-tag"><Eye size={14}/> LIVE PREVIEW</span><button className="button outline print-button" onClick={() => exportPdf('all')}><FileSpreadsheet size={15}/> PDF</button><button className="button primary print-button" onClick={() => printLabels('all')}><Printer size={15}/> Print all</button></div>
       {!records.length ? <div className="empty">Your labels will appear here after you upload a file.</div> : customLayout && !lines.some(line => line.text.trim()) ? <div className="empty">Add at least one custom line to preview.</div> : <><div className="preview-sheet"><div className="preview-grid">{previewRecords.map((record, index) => <React.Fragment key={index}>{renderLabel(record)}</React.Fragment>)}</div></div><div className="preview-footer">Showing {previewRecords.length} of {records.length} labels{records.length > 8 && <button className="text-button" onClick={() => setShowAll(value => !value)}>{showAll ? 'Show fewer' : 'Show more'}</button>}</div></>}
     </section>
 
     <footer>Custom Labels Generator · Excel-powered label printing</footer>
-    <div className="print-document">{printPages.map((page, index) => <div className="print-page" key={index}><div className="print-grid">{page.map((record, i) => <React.Fragment key={i}>{renderLabel(record)}</React.Fragment>)}{Array.from({ length: Math.max(0, perPage - page.length) }).map((_, i) => <div className="label blank" key={'blank' + i}/>)}</div></div>)}</div>
+    <div className="print-document">
+      {printTestMode
+        ? <div className="print-page"><div className="print-grid calibration-grid-output">{Array.from({ length: perPage }).map((_, index) => <div className="label calibration-label" key={index}><span>ALIGN {index + 1}</span><i aria-hidden="true"/></div>)}</div></div>
+        : printPages.map((page, index) => <div className="print-page" key={index}><div className="print-grid">{page.map((record, i) => <React.Fragment key={i}>{renderLabel(record)}</React.Fragment>)}{Array.from({ length: Math.max(0, perPage - page.length) }).map((_, i) => <div className="label blank" key={'blank' + i}/>)}</div></div>)}
+    </div>
   </main>;
 }
