@@ -49,6 +49,7 @@ function BarcodeVisual({ value, format = 'CODE128', foreground = '#111111', back
   useEffect(() => {
     let active = true;
     setError('');
+    if (svgRef.current) svgRef.current.replaceChildren();
     if (!value || !svgRef.current) return () => { active = false; };
     (async () => {
       try {
@@ -124,7 +125,7 @@ function readInitialProjectState() {
           height: Math.max(1, numberOr(element.height, 6))
         })) : [],
         labelBackground: typeof page.labelBackground === 'string' ? page.labelBackground : '',
-        settings: normalizeSettings(page.settings),
+        settings: page.settings && typeof page.settings === 'object' ? normalizeSettings(page.settings) : null,
         visualLayout: page.visualLayout == null ? Boolean(page.visualElements?.length) : Boolean(page.visualLayout)
       }));
     }
@@ -787,8 +788,20 @@ export default function App() {
             }
           }
         } else {
-          const content = getLabelLines(record).map(line => ({ ...line, wrapped: doc.splitTextToSize(String(line.text), contentWidth) }));
-          const totalHeight = content.reduce((sum, line) => sum + line.wrapped.length * lineHeight + lineGap, 0);
+          const sourceLines = getLabelLines(record).map(line => ({ ...line, wrapped: doc.splitTextToSize(String(line.text), contentWidth) }));
+          const availableHeight = Math.max(0, labelHeight - 2 * padding);
+          let remainingHeight = availableHeight;
+          const content = [];
+          sourceLines.forEach(line => {
+            const gap = content.length ? lineGap : 0;
+            const linesThatFit = Math.max(0, Math.floor((remainingHeight - gap) / lineHeight));
+            const wrapped = line.wrapped.slice(0, linesThatFit);
+            if (wrapped.length) {
+              content.push({ ...line, wrapped });
+              remainingHeight -= gap + wrapped.length * lineHeight;
+            }
+          });
+          const totalHeight = content.reduce((sum, line, index) => sum + line.wrapped.length * lineHeight + (index ? lineGap : 0), 0);
           let baseline = settings.vertical === 'top'
             ? y + padding + fontHeight
             : settings.vertical === 'bottom'
@@ -796,11 +809,11 @@ export default function App() {
               : y + (labelHeight - totalHeight) / 2 + fontHeight;
           const align = settings.alignment;
           const textX = align === 'left' ? x + padding : align === 'right' ? x + labelWidth - padding : x + labelWidth / 2;
-          content.forEach(line => {
+          content.forEach((line, lineIndex) => {
             doc.setFont('helvetica', line.bold ? 'bold' : 'normal');
             doc.setFontSize(fontSize);
             line.wrapped.forEach(part => { doc.text(part, textX, baseline, { align }); baseline += lineHeight; });
-            baseline += lineGap;
+            if (lineIndex < content.length - 1) baseline += lineGap;
           });
         }
       }
