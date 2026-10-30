@@ -792,151 +792,201 @@ export default function App() {
     } catch (error) { setStatus({ type: 'error', text: 'Excel export failed: ' + (error.message || 'Unknown error') }); }
   }
   async function exportPdf(mode = 'all') {
-    const source = mode === 'selected' ? selectedRecords : records;
-    if (!validateForOutput(source)) return;
-    const activeDesign = currentDesignPages.find(page => page.id === activeDesignPageId) || { visualLayout, visualElements, labelBackground, settings };
-    const directJob = [{ id: 'pdf-' + activeDesignPageId, design: activeDesign, settings: normalizeSettings(activeDesign.settings || settings), metrics: getPageMetricsForSettings(normalizeSettings(activeDesign.settings || settings)), records: source, copies: 1, name: activeDesign.name || 'Current design', content: hasLabelContent }];
-    if (!validatePrintJobs(directJob)) return;
+    let jobs = [];
+    if (mode === 'queue') {
+      jobs = queuedPrintJobs;
+    } else {
+      const source = mode === 'selected' ? selectedRecords : records;
+      if (!validateForOutput(source)) return;
+      const activeDesign = currentDesignPages.find(page => page.id === activeDesignPageId) || { visualLayout, visualElements, labelBackground, settings };
+      jobs = [{
+        id: 'pdf-' + activeDesignPageId,
+        design: activeDesign,
+        settings: normalizeSettings(activeDesign.settings || settings),
+        metrics: getPageMetricsForSettings(normalizeSettings(activeDesign.settings || settings)),
+        records: source,
+        copies: 1,
+        name: activeDesign.name || 'Current design',
+        content: hasLabelContent
+      }];
+    }
+    if (!validatePrintJobs(jobs)) return;
+
     try {
       const { jsPDF } = await import('jspdf');
-      const pageWidth = pageMetrics.pageWidth;
-      const pageHeight = pageMetrics.pageHeight;
-      const orientation = pageWidth > pageHeight ? 'landscape' : 'portrait';
-      const doc = new jsPDF({ orientation, unit: 'mm', format: [pageWidth, pageHeight], compress: true });
-      doc.setProperties({ title: 'Custom Labels', subject: 'Generated printable labels' });
-      const columns = Math.max(1, Number(settings.columns));
-      const labelWidth = Number(settings.labelWidth);
-      const labelHeight = Number(settings.labelHeight);
-      const gapX = Number(settings.gapX);
-      const gapY = Number(settings.gapY);
-      const padding = Number(settings.padding);
-      const fontSize = Number(settings.fontSize);
-      const lineGap = Number(settings.lineGap);
-      const gridWidth = columns * labelWidth + (columns - 1) * gapX;
-      const startX = pageMetrics.gridStartX;
-      const startY = pageMetrics.gridStartY;
-      const fontHeight = fontSize * 0.3528;
-      const lineHeight = fontHeight * 1.25;
-      const contentWidth = Math.max(5, labelWidth - 2 * padding);
-      const pdfFont = family => /times/i.test(family || '') ? 'times' : /courier/i.test(family || '') ? 'courier' : 'helvetica';
-      const hexColor = value => /^#[0-9a-f]{6}$/i.test(value || '') ? value : '#111111';
       const { default: JsBarcode } = await import('jsbarcode');
       const { default: QRCode } = await import('qrcode');
+      const firstMetrics = jobs[0].metrics;
+      const firstOrientation = firstMetrics.pageWidth > firstMetrics.pageHeight ? 'landscape' : 'portrait';
+      const doc = new jsPDF({
+        orientation: firstOrientation,
+        unit: 'mm',
+        format: [firstMetrics.pageWidth, firstMetrics.pageHeight],
+        compress: true
+      });
+      doc.setProperties({ title: 'Custom Labels - Print Batch', subject: 'Multi-design printable label batch' });
+      const pdfFont = family => /times/i.test(family || '') ? 'times' : /courier/i.test(family || '') ? 'courier' : 'helvetica';
+      const hexColor = value => /^#[0-9a-f]{6}$/i.test(value || '') ? value : '#111111';
+      let physicalPageCount = 0;
+      let labelCount = 0;
 
-      for (let index = 0; index < source.length; index += 1) {
-        const record = source[index];
-        const pagePosition = index % perPage;
-        if (index > 0 && pagePosition === 0) doc.addPage([pageWidth, pageHeight], orientation);
-        const column = pagePosition % columns;
-        const row = Math.floor(pagePosition / columns);
-        const x = startX + column * (labelWidth + gapX);
-        const y = startY + row * (labelHeight + gapY);
+      for (const job of jobs) {
+        const design = job.design || {};
+        const cfg = job.settings;
+        const metrics = job.metrics;
+        const columns = metrics.columns;
+        const perSheet = metrics.perPage;
+        const labelWidth = Number(cfg.labelWidth);
+        const labelHeight = Number(cfg.labelHeight);
+        const gapX = Number(cfg.gapX);
+        const gapY = Number(cfg.gapY);
+        const padding = Number(cfg.padding);
+        const fontSize = Number(cfg.fontSize);
+        const lineGap = Number(cfg.lineGap);
+        const designIsVisual = Boolean(design.visualLayout);
+        const elements = Array.isArray(design.visualElements) ? design.visualElements : [];
+        const background = design.labelBackground || '';
+        const orientation = metrics.pageWidth > metrics.pageHeight ? 'landscape' : 'portrait';
 
-        if (visualLayout) {
-          if (labelBackground) doc.addImage(labelBackground, 'JPEG', x, y, labelWidth, labelHeight);
-          for (const element of visualElements) {
-            const isShape=['rectangle','circle','line'].includes(element.type);
-            const text=element.type==='logo'?element.text:renderLine(element.text,record);
-            if(!text&&!isShape) continue;
-            const ex=x+Number(element.x), ey=y+Number(element.y), ew=Number(element.width), eh=Number(element.height);
-            if(isShape){
-              const fill=element.backgroundColor&&element.backgroundColor!=='transparent';
-              const stroke=Number(element.borderWidth)>0;
-              if(element.type==='line'){
-                doc.setDrawColor(hexColor(element.color||element.borderColor));
-                doc.setLineWidth(Math.max(0.2,Number(element.borderWidth)||0.4));
-                doc.line(ex,ey+eh/2,ex+ew,ey+eh/2);
+        for (let copyIndex = 0; copyIndex < job.copies; copyIndex += 1) {
+          for (let startIndex = 0; startIndex < job.records.length; startIndex += perSheet) {
+            if (physicalPageCount > 0) doc.addPage([metrics.pageWidth, metrics.pageHeight], orientation);
+            physicalPageCount += 1;
+            const sheetRecords = job.records.slice(startIndex, startIndex + perSheet);
+
+            for (let sheetIndex = 0; sheetIndex < sheetRecords.length; sheetIndex += 1) {
+              const record = sheetRecords[sheetIndex];
+              const column = sheetIndex % columns;
+              const row = Math.floor(sheetIndex / columns);
+              const x = metrics.gridStartX + column * (labelWidth + gapX);
+              const y = metrics.gridStartY + row * (labelHeight + gapY);
+              labelCount += 1;
+
+              if (designIsVisual) {
+                if (background) doc.addImage(background, 'JPEG', x, y, labelWidth, labelHeight);
+                for (const element of elements) {
+                  const isShape = ['rectangle', 'circle', 'line'].includes(element.type);
+                  const text = element.type === 'logo' ? element.text : renderLine(element.text || '', record);
+                  if (!text && !isShape) continue;
+                  const ex = x + Number(element.x || 0);
+                  const ey = y + Number(element.y || 0);
+                  const ew = Number(element.width || 1);
+                  const eh = Number(element.height || 1);
+
+                  if (isShape) {
+                    const fill = element.backgroundColor && element.backgroundColor !== 'transparent';
+                    const stroke = Number(element.borderWidth) > 0;
+                    if (element.type === 'line') {
+                      doc.setDrawColor(hexColor(element.color || element.borderColor));
+                      doc.setLineWidth(Math.max(0.2, Number(element.borderWidth) || 0.4));
+                      doc.line(ex, ey + eh / 2, ex + ew, ey + eh / 2);
+                    } else {
+                      if (fill) doc.setFillColor(hexColor(element.backgroundColor));
+                      doc.setDrawColor(hexColor(element.borderColor));
+                      doc.setLineWidth(Math.max(0.1, Number(element.borderWidth) || 0.2));
+                      const shapeMode = fill && stroke ? 'FD' : fill ? 'F' : 'S';
+                      if (element.type === 'circle') doc.ellipse(ex + ew / 2, ey + eh / 2, ew / 2, eh / 2, shapeMode);
+                      else doc.roundedRect(ex, ey, ew, eh, Number(element.borderRadius || 0), Number(element.borderRadius || 0), shapeMode);
+                    }
+                    continue;
+                  }
+
+                  const fill = element.backgroundColor && element.backgroundColor !== 'transparent';
+                  const bordered = Number(element.borderWidth) > 0;
+                  if (fill || bordered) {
+                    if (fill) doc.setFillColor(hexColor(element.backgroundColor));
+                    if (bordered) {
+                      doc.setDrawColor(hexColor(element.borderColor));
+                      doc.setLineWidth(Number(element.borderWidth));
+                    }
+                    if (fill && bordered) doc.roundedRect(ex, ey, ew, eh, Number(element.borderRadius || 0), Number(element.borderRadius || 0), 'FD');
+                    else if (fill) doc.rect(ex, ey, ew, eh, 'F');
+                    else doc.roundedRect(ex, ey, ew, eh, Number(element.borderRadius || 0), Number(element.borderRadius || 0), 'S');
+                  }
+
+                  if (element.type === 'logo') {
+                    if (element.imageSrc) doc.addImage(element.imageSrc, 'PNG', ex, ey, ew, eh);
+                  } else if (element.type === 'qr') {
+                    const dataUrl = await QRCode.toDataURL(text, {
+                      width: 360, margin: 1, errorCorrectionLevel: 'M',
+                      color: { dark: hexColor(element.color) + 'FF', light: (fill ? hexColor(element.backgroundColor) : '#FFFFFFFF') }
+                    });
+                    doc.addImage(dataUrl, 'PNG', ex, ey, ew, eh);
+                  } else if (element.type === 'barcode') {
+                    const canvas = document.createElement('canvas');
+                    JsBarcode(canvas, text, {
+                      format: element.barcodeFormat || 'CODE128',
+                      lineColor: hexColor(element.color),
+                      background: fill ? hexColor(element.backgroundColor) : '#ffffff',
+                      width: 2,
+                      height: Math.max(28, Math.round(eh * 3.78)),
+                      displayValue: element.displayValue !== false,
+                      fontSize: 12,
+                      margin: 2
+                    });
+                    doc.addImage(canvas.toDataURL('image/png'), 'PNG', ex, ey, ew, eh);
+                  } else {
+                    const family = pdfFont(element.fontFamily);
+                    const size = Number(element.fontSize) || fontSize;
+                    const align = element.align || 'left';
+                    const textX = align === 'left' ? ex + 0.5 : align === 'right' ? ex + ew - 0.5 : ex + ew / 2;
+                    const wrapped = doc.splitTextToSize(text, Math.max(2, ew - 1));
+                    doc.setFont(family, element.bold ? 'bold' : 'normal');
+                    doc.setFontSize(size);
+                    doc.setTextColor(hexColor(element.color));
+                    const elementLineHeight = size * 0.3528 * 1.2;
+                    const maxLines = Math.max(1, Math.floor(Math.max(0, eh - 0.8) / elementLineHeight));
+                    let baseline = ey + size * 0.3528 + 0.4;
+                    wrapped.slice(0, maxLines).forEach(part => {
+                      doc.text(part, textX, baseline, { align });
+                      baseline += elementLineHeight;
+                    });
+                  }
+                }
               } else {
-                if(fill) doc.setFillColor(hexColor(element.backgroundColor));
-                doc.setDrawColor(hexColor(element.borderColor));
-                doc.setLineWidth(Math.max(0.1,Number(element.borderWidth)||0.2));
-                const mode=fill&&stroke?'FD':fill?'F':'S';
-                if(element.type==='circle') doc.ellipse(ex+ew/2,ey+eh/2,ew/2,eh/2,mode);
-                else doc.roundedRect(ex,ey,ew,eh,Number(element.borderRadius||0),Number(element.borderRadius||0),mode);
+                const fontHeight = fontSize * 0.3528;
+                const lineHeight = fontHeight * 1.25;
+                const contentWidth = Math.max(5, labelWidth - 2 * padding);
+                const sourceLines = getLabelLines(record, design).map(line => ({
+                  ...line,
+                  wrapped: doc.splitTextToSize(String(line.text), contentWidth)
+                }));
+                const availableHeight = Math.max(0, labelHeight - 2 * padding);
+                let remainingHeight = availableHeight;
+                const content = [];
+                sourceLines.forEach(line => {
+                  const gap = content.length ? lineGap : 0;
+                  const linesThatFit = Math.max(0, Math.floor((remainingHeight - gap) / lineHeight));
+                  const wrapped = line.wrapped.slice(0, linesThatFit);
+                  if (wrapped.length) {
+                    content.push({ ...line, wrapped });
+                    remainingHeight -= gap + wrapped.length * lineHeight;
+                  }
+                });
+                const totalHeight = content.reduce((sum, line, index) => sum + line.wrapped.length * lineHeight + (index ? lineGap : 0), 0);
+                let baseline = cfg.vertical === 'top'
+                  ? y + padding + fontHeight
+                  : cfg.vertical === 'bottom'
+                    ? y + labelHeight - padding - totalHeight + fontHeight
+                    : y + (labelHeight - totalHeight) / 2 + fontHeight;
+                const align = cfg.alignment;
+                const textX = align === 'left' ? x + padding : align === 'right' ? x + labelWidth - padding : x + labelWidth / 2;
+                content.forEach((line, lineIndex) => {
+                  doc.setFont('helvetica', line.bold ? 'bold' : 'normal');
+                  doc.setFontSize(fontSize);
+                  line.wrapped.forEach(part => {
+                    doc.text(part, textX, baseline, { align });
+                    baseline += lineHeight;
+                  });
+                  if (lineIndex < content.length - 1) baseline += lineGap;
+                });
               }
-              continue;
-            }
-            const fill = element.backgroundColor && element.backgroundColor !== 'transparent';
-            const bordered = Number(element.borderWidth) > 0;
-            if (fill || bordered) {
-              if (fill) doc.setFillColor(hexColor(element.backgroundColor));
-              if (bordered) {
-                doc.setDrawColor(hexColor(element.borderColor));
-                doc.setLineWidth(Number(element.borderWidth));
-              }
-              if (fill && bordered) doc.roundedRect(ex, ey, ew, eh, Number(element.borderRadius || 0), Number(element.borderRadius || 0), 'FD');
-              else if (fill) doc.rect(ex, ey, ew, eh, 'F');
-              else doc.roundedRect(ex, ey, ew, eh, Number(element.borderRadius || 0), Number(element.borderRadius || 0), 'S');
-            }
-
-            if(element.type==='logo'){
-              if(element.imageSrc) doc.addImage(element.imageSrc,'PNG',ex,ey,ew,eh);
-            } else             if (element.type === 'qr') {
-              const dataUrl = await QRCode.toDataURL(text, {
-                width: 360, margin: 1, errorCorrectionLevel: 'M',
-                color: { dark: hexColor(element.color) + 'FF', light: (fill ? hexColor(element.backgroundColor) : '#FFFFFFFF') }
-              });
-              doc.addImage(dataUrl, 'PNG', ex, ey, ew, eh);
-            } else if (element.type === 'barcode') {
-              const canvas = document.createElement('canvas');
-              JsBarcode(canvas, text, {
-                format: element.barcodeFormat || 'CODE128',
-                lineColor: hexColor(element.color),
-                background: fill ? hexColor(element.backgroundColor) : '#ffffff',
-                width: 2,
-                height: Math.max(28, Math.round(eh * 3.78)),
-                displayValue: element.displayValue !== false,
-                fontSize: 12,
-                margin: 2
-              });
-              doc.addImage(canvas.toDataURL('image/png'), 'PNG', ex, ey, ew, eh);
-            } else {
-              const family = pdfFont(element.fontFamily);
-              const size = Number(element.fontSize) || fontSize;
-              const align = element.align || 'left';
-              const textX = align === 'left' ? ex + 0.5 : align === 'right' ? ex + ew - 0.5 : ex + ew / 2;
-              const linesWrapped = doc.splitTextToSize(text, Math.max(2, ew - 1));
-              doc.setFont(family, element.bold ? 'bold' : 'normal');
-              doc.setFontSize(size);
-              doc.setTextColor(hexColor(element.color));
-              const lineHeightForElement = size * 0.3528 * 1.2;
-              const maxLines = Math.max(1, Math.floor(Math.max(0, eh - 0.8) / lineHeightForElement));
-              let baseline = ey + size * 0.3528 + 0.4;
-              linesWrapped.slice(0, maxLines).forEach(part => { doc.text(part, textX, baseline, { align }); baseline += lineHeightForElement; });
             }
           }
-        } else {
-          const sourceLines = getLabelLines(record).map(line => ({ ...line, wrapped: doc.splitTextToSize(String(line.text), contentWidth) }));
-          const availableHeight = Math.max(0, labelHeight - 2 * padding);
-          let remainingHeight = availableHeight;
-          const content = [];
-          sourceLines.forEach(line => {
-            const gap = content.length ? lineGap : 0;
-            const linesThatFit = Math.max(0, Math.floor((remainingHeight - gap) / lineHeight));
-            const wrapped = line.wrapped.slice(0, linesThatFit);
-            if (wrapped.length) {
-              content.push({ ...line, wrapped });
-              remainingHeight -= gap + wrapped.length * lineHeight;
-            }
-          });
-          const totalHeight = content.reduce((sum, line, index) => sum + line.wrapped.length * lineHeight + (index ? lineGap : 0), 0);
-          let baseline = settings.vertical === 'top'
-            ? y + padding + fontHeight
-            : settings.vertical === 'bottom'
-              ? y + labelHeight - padding - totalHeight + fontHeight
-              : y + (labelHeight - totalHeight) / 2 + fontHeight;
-          const align = settings.alignment;
-          const textX = align === 'left' ? x + padding : align === 'right' ? x + labelWidth - padding : x + labelWidth / 2;
-          content.forEach((line, lineIndex) => {
-            doc.setFont('helvetica', line.bold ? 'bold' : 'normal');
-            doc.setFontSize(fontSize);
-            line.wrapped.forEach(part => { doc.text(part, textX, baseline, { align }); baseline += lineHeight; });
-            if (lineIndex < content.length - 1) baseline += lineGap;
-          });
         }
       }
-      doc.save('custom-labels' + (mode === 'selected' ? '-selected' : '') + '.pdf');
-      setStatus({ type: 'success', text: source.length + ' labels exported to PDF.' });
+      doc.save(mode === 'queue' ? 'custom-labels-multi-design-batch.pdf' : 'custom-labels' + (mode === 'selected' ? '-selected' : '') + '.pdf');
+      setStatus({ type: 'success', text: labelCount + ' labels across ' + physicalPageCount + ' print sheets exported to PDF.' });
     } catch (error) {
       setStatus({ type: 'error', text: 'PDF export failed: ' + (error.message || 'Unknown error') });
     }
