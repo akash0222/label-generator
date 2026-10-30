@@ -1197,7 +1197,7 @@ export default function App() {
     </nav>
 
     <section id="step-data" className="panel upload-panel"><div className="section-title"><span className="step">01</span><div><h2>Upload your Excel file</h2><p>Upload .xlsx, .xls or .csv. Column headings are detected automatically.</p></div></div>
-      <div className="upload-zone" onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); loadFile(e.dataTransfer.files?.[0]); }} onClick={() => fileRef.current?.click()}><input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" hidden onChange={e => { const file = e.currentTarget.files?.[0]; e.currentTarget.value = ''; loadFile(file); }}/><Upload size={23}/><div><b>Choose an Excel file</b><span> or drag and drop it here<small>Supported formats: XLSX, XLS and CSV</small></span></div><button className="button outline" type="button">Browse files</button></div>
+      <div className="upload-zone" role="button" tabIndex={0} aria-label="Choose an Excel or CSV file" onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileRef.current?.click(); } }} onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); loadFile(e.dataTransfer.files?.[0]); }} onClick={() => fileRef.current?.click()}><input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" hidden onChange={e => { const file = e.currentTarget.files?.[0]; e.currentTarget.value = ''; loadFile(file); }}/><Upload size={23}/><div><b>Choose an Excel file</b><span> or drag and drop it here<small>Supported formats: XLSX, XLS and CSV</small></span></div><button className="button outline" type="button">Browse files</button></div>
       {fileName && <div className="file-chip"><FileSpreadsheet size={15}/>{fileName}<b>{records.length} records</b></div>}
       {sheetNames.length > 1 && <label className="worksheet-picker">Worksheet<select value={selectedSheet} onChange={e => changeWorksheet(e.target.value)}>{sheetNames.map(name => <option key={name} value={name}>{name}</option>)}</select></label>}
       <div className={'status ' + status.type}>{status.type === 'success' ? <Check size={15}/> : <AlertCircle size={15}/>} {status.text}</div>
@@ -1219,9 +1219,9 @@ export default function App() {
         <input className="line-input" value={line.text} placeholder="Example: {@Student Name} {@Father Name}" onChange={e => updateLine(line.id, { text: e.target.value })}/>
         <select aria-label="Insert Excel column" defaultValue="" onChange={e => { if (e.target.value) { updateLine(line.id, { text: line.text + (line.text ? ' ' : '') + '{@' + e.target.value + '}' }); e.target.value = ''; } }}><option value="">Insert column…</option>{headers.map(h => <option key={h} value={h}>{h}</option>)}</select>
         <label className="bold-toggle"><input type="checkbox" checked={line.bold} onChange={e => updateLine(line.id, { bold: e.target.checked })}/> Bold</label>
-        <button className="icon-button" title="Move line up" disabled={index === 0} onClick={() => moveLine(index, -1)}>↑</button>
-        <button className="icon-button" title="Move line down" disabled={index === lines.length - 1} onClick={() => moveLine(index, 1)}>↓</button>
-        <button className="icon-button delete" title="Remove line" onClick={() => setLines(old => old.filter(item => item.id !== line.id))}><Trash2 size={14}/></button>
+        <button type="button" className="icon-button" title="Move line up" aria-label="Move label line up" disabled={index === 0} onClick={() => moveLine(index, -1)}>↑</button>
+        <button type="button" className="icon-button" title="Move line down" aria-label="Move label line down" disabled={index === lines.length - 1} onClick={() => moveLine(index, 1)}>↓</button>
+        <button type="button" className="icon-button delete" title="Remove line" aria-label="Remove label line" onClick={() => setLines(old => old.filter(item => item.id !== line.id))}><Trash2 size={14}/></button>
       </div>)}</div>}
         <p className="hint">Use <code>{'{@Column Heading}'}</code> for Excel values and <code>{'{@relationship}'}</code> for D/o or S/o based on Gender. Add fixed text around placeholders. Empty values are omitted automatically. Drag the numbered handle to reorder lines.</p>
         <button className="button add-line" onClick={addLine}><Plus size={15}/> Add label line</button>
