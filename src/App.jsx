@@ -1060,7 +1060,7 @@ export default function App() {
       <button type="button" onClick={() => document.getElementById('step-data')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}><span>01</span><strong>Import data</strong><small>Excel / CSV</small></button>
       <button type="button" onClick={() => document.getElementById('step-design')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}><span>02</span><strong>Design label</strong><small>Canvas / fields</small></button>
       <button type="button" onClick={() => document.getElementById('step-print-layout')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}><span>03</span><strong>Set up sheet</strong><small>Paper / alignment</small></button>
-      <button type="button" onClick={() => document.getElementById('step-export')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}><span>04</span><strong>Print & export</strong><small>Records / PDF</small></button>
+      <button type="button" onClick={() => document.getElementById('print-queue')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}><span>04</span><strong>Print & export</strong><small>Records / PDF</small></button>
     </nav>
 
     <section id="step-data" className="panel upload-panel"><div className="section-title"><span className="step">01</span><div><h2>Upload your Excel file</h2><p>Upload .xlsx, .xls or .csv. Column headings are detected automatically.</p></div></div>
@@ -1286,7 +1286,7 @@ export default function App() {
     </section>
 
     <section id="step-export" className="panel records-panel">
-      <div className="section-title"><span className="step">07</span><div><h2>Select records to print</h2><p>Choose individual rows or print all records from the current worksheet.</p></div><span className="selected-count">{selectedIndexes.length} / {records.length} selected</span></div>
+      <div className="section-title"><span className="step">06</span><div><h2>Select records to print</h2><p>Choose individual rows or print all records from the current worksheet.</p></div><span className="selected-count">{selectedIndexes.length} / {records.length} selected</span></div>
       <div className="record-toolbar">
         <input type="search" value={recordSearch} onChange={e => { setRecordSearch(e.target.value); setRecordPage(0); }} placeholder="Search names, registration numbers or any Excel value…"/>
         <button className="text-button" onClick={selectAllRecords} disabled={!records.length}>Select all</button>
