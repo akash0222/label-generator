@@ -462,7 +462,6 @@ export default function App() {
       : columnNames.slice(0, 2).map((heading, index) => ({ id: 'l' + index, text: '{@' + heading + '}', bold: index === 0 }));
     setFields(mappedFields);
     setLines(nextLines);
-    setCustomLayout(false);
     if (visualLayout && !visualElements.length && !labelBackground) setVisualLayout(false);
     setShowAll(false);
     setPrintSelectionOnly(false);
@@ -731,6 +730,7 @@ export default function App() {
     setLabelBackground(target.labelBackground||''); setSettings(normalizeSettings(target.settings));
     setVisualLayout(Boolean(target.visualLayout)); setSelectedVisualId(target.visualElements?.[0]?.id||'');
     setFields(target.fields || []); setLines(target.lines || []); setCustomLayout(Boolean(target.customLayout));
+    if (queueDesignSelection === activeDesignPageId) setQueueDesignSelection(target.id);
   }
   function applyStarterTemplate(kind) {
     const width=Number(settings.labelWidth), height=Number(settings.labelHeight), full=Math.max(10,width-6);
@@ -1113,6 +1113,7 @@ export default function App() {
     const template = savedTemplates.find(item => item.id === selectedTemplateId);
     if (!template) { setStatus({ type: 'error', text: 'Choose a saved template first.' }); return; }
     if (!headers.length) { setStatus({ type: 'error', text: 'Upload a spreadsheet before applying a template.' }); return; }
+    setPrintQueue([]);
     const mappedFields = headers.map((heading, index) => {
       const saved = (template.fields || []).find(field => norm(field.label) === norm(heading));
       return { id: 'f' + index, label: heading, enabled: saved?.enabled ?? false, bold: saved?.bold ?? false, prefix: saved?.prefix ?? '', suffix: saved?.suffix ?? '' };
@@ -1130,14 +1131,16 @@ export default function App() {
       setActiveDesignPageId(active.id);setDesignPageName(active.name||'Design 1');
       setVisualElements(active.visualElements||[]);setLabelBackground(active.labelBackground||'');
       setSettings(normalizeSettings(active.settings || template.settings));setVisualLayout(Boolean(active.visualLayout));
-      setFields(active.fields || mappedFields); setLines(active.lines || template.lines || []); setCustomLayout(Boolean(active.customLayout ?? template.customLayout));
+      setFields(active.fields?.length ? active.fields : mappedFields); setLines(active.lines?.length ? active.lines : (template.lines || [])); setCustomLayout(Boolean(active.customLayout ?? template.customLayout));
+      setQueueDesignSelection(active.id);
     } else {
       setDesignPages([{id:'design-1',name:'Design 1',visualElements:template.visualElements||[],labelBackground:template.labelBackground||'',settings:{...defaults,...template.settings},visualLayout:Boolean(template.visualLayout),fields:mappedFields,lines:template.lines||[],customLayout:Boolean(template.customLayout)}]);
       setActiveDesignPageId('design-1');setDesignPageName('Design 1');
+      setQueueDesignSelection('design-1');
     }
     if (!template.designPages?.length) setSettings(normalizeSettings(template.settings));
     setTemplateName(template.name);
-    setStatus({ type: 'success', text: 'Template "' + template.name + '" applied.' });
+    setStatus({ type: 'success', text: 'Template "' + template.name + '" applied. The previous print queue was cleared to avoid using outdated designs.' });
   }
   function deleteTemplate() {
     if (!selectedTemplateId) return;
