@@ -1,5 +1,4 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import * as XLSX from 'xlsx';
 import { Upload, FileSpreadsheet, Printer, Plus, Trash2, Eye, Check, AlertCircle, RotateCcw } from 'lucide-react';
 
 const sampleRows = [
@@ -69,6 +68,7 @@ export default function App() {
       if (file.size > MAX_UPLOAD_BYTES) throw new Error('File is larger than 20 MB. Please use a smaller spreadsheet.');
       const extension = file.name.split('.').pop().toLowerCase();
       if (!['xlsx', 'xls', 'csv'].includes(extension)) throw new Error('Unsupported file type. Upload an XLSX, XLS or CSV file.');
+      const XLSX = await import('xlsx');
       const book = XLSX.read(await file.arrayBuffer(), { type: 'array', cellDates: true, cellFormula: false, cellHTML: false });
       const sheet = book.Sheets[book.SheetNames[0]];
       if (!sheet) throw new Error('No worksheet found.');
