@@ -314,7 +314,7 @@ export default function App() {
   }
   function validateForOutput(source) {
     if (!source.length) { setStatus({ type: 'error', text: 'No records are selected for this action.' }); return false; }
-    if (customLayout ? !lines.some(line => line.text.trim()) : !enabledFields.length) { setStatus({ type: 'error', text: 'Select at least one field or enter a label line.' }); return false; }
+    if (visualLayout ? !visualElements.some(element => element.text.trim()) : customLayout ? !lines.some(line => line.text.trim()) : !enabledFields.length) { setStatus({ type: 'error', text: 'Add at least one visual element, select a field, or enter a label line.' }); return false; }
     if (!pageMetrics.valid) { setStatus({ type: 'error', text: 'Enter valid positive page and label dimensions, and non-negative gaps.' }); return false; }
     if (!pageMetrics.fits) { setStatus({ type: 'error', text: 'The label grid (' + pageMetrics.gridWidth.toFixed(1) + ' × ' + pageMetrics.gridHeight.toFixed(1) + ' mm) exceeds the printable area (' + pageMetrics.printableWidth.toFixed(1) + ' × ' + pageMetrics.printableHeight.toFixed(1) + ' mm). Reduce the label size, rows, columns or gaps before printing.' }); return false; }
     return true;
