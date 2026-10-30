@@ -37,6 +37,11 @@ export default function App() {
   });
   const [selectedTemplateId, setSelectedTemplateId] = useState('');
   const [draggingLine, setDraggingLine] = useState(null);
+  const [visualLayout, setVisualLayout] = useState(false);
+  const [visualElements, setVisualElements] = useState([]);
+  const [selectedVisualId, setSelectedVisualId] = useState('');
+  const [visualDrag, setVisualDrag] = useState(null);
+  const [newVisualField, setNewVisualField] = useState('');
   const fileRef = useRef(null);
   const workbookRef = useRef(null);
   const enabledFields = fields.filter(field => field.enabled);
@@ -124,6 +129,9 @@ export default function App() {
     if (!data.length) throw new Error('No data rows found below the detected header row in "' + sheetName + '".');
 
     setRecords(data);
+    setVisualLayout(false);
+    setVisualElements([]);
+    setSelectedVisualId('');
     setHeaders(columnNames);
     setFileName(sourceName);
     setSelectedSheet(sheetName);
@@ -203,11 +211,105 @@ export default function App() {
   }
   function toggleField(id) { setFields(old => old.map(field => field.id === id ? { ...field, enabled: !field.enabled } : field)); }
   function getLabelLines(record) {
+    if (visualLayout) {
+      return visualElements.map(element => ({
+        id: element.id,
+        text: renderLine(element.text, record),
+        bold: element.bold,
+        fontSize: Number(element.fontSize) || Number(settings.fontSize),
+        align: element.align || 'left'
+      })).filter(line => line.text);
+    }
     return customLayout
       ? lines.map(line => ({ id: line.id, text: renderLine(line.text, record), bold: line.bold })).filter(line => line.text)
       : enabledFields.map(field => ({ id: field.id, text: (field.prefix || '') + (getValue(record, field.label) || '') + (field.suffix || ''), bold: field.bold })).filter(line => line.text);
   }
-  function renderLabel(record) {
+  function createVisualElement(text, bold = false) {
+    const index = visualElements.length;
+    const element = {
+      id: 've-' + Date.now() + '-' + index,
+      text,
+      x: 3,
+      y: Math.min(3 + index * 6, Math.max(0, Number(settings.labelHeight) - 7)),
+      width: Math.max(10, Number(settings.labelWidth) - 6),
+      height: 5,
+      fontSize: Number(settings.fontSize) || 11,
+      bold,
+      align: 'left'
+    };
+    setVisualElements(old => [...old, element]);
+    setSelectedVisualId(element.id);
+  }
+  function enableVisualLayout(checked) {
+    setVisualLayout(checked);
+    if (checked && !visualElements.length) {
+      const source = customLayout && lines.length ? lines : enabledFields;
+      const next = source.map((item, index) => ({
+        id: 've-' + Date.now() + '-' + index,
+        text: customLayout ? item.text : '{@' + item.label + '}',
+        x: 3,
+        y: Math.min(3 + index * 6, Math.max(0, Number(settings.labelHeight) - 7)),
+        width: Math.max(10, Number(settings.labelWidth) - 6),
+        height: 5,
+        fontSize: Number(settings.fontSize) || 11,
+        bold: Boolean(item.bold),
+        align: 'left'
+      }));
+      setVisualElements(next);
+      setSelectedVisualId(next[0]?.id || '');
+    }
+  }
+  function updateVisualElement(id, patch) {
+    setVisualElements(old => old.map(element => element.id === id ? { ...element, ...patch } : element));
+  }
+  function removeVisualElement(id) {
+    setVisualElements(old => old.filter(element => element.id !== id));
+    if (selectedVisualId === id) setSelectedVisualId('');
+  }
+  function moveVisualElement(event, element) {
+    if (!visualDrag || visualDrag.id !== element.id) return;
+    const canvas = event.currentTarget.parentElement;
+    const rect = canvas.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+    const dx = (event.clientX - visualDrag.startClientX) / rect.width * Number(settings.labelWidth);
+    const dy = (event.clientY - visualDrag.startClientY) / rect.height * Number(settings.labelHeight);
+    const x = Math.max(0, Math.min(Number(settings.labelWidth) - Number(element.width), visualDrag.startX + dx));
+    const y = Math.max(0, Math.min(Number(settings.labelHeight) - Number(element.height), visualDrag.startY + dy));
+    updateVisualElement(element.id, { x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10 });
+  }
+  function renderLabel(record, editing = false) {
+    if (visualLayout) {
+      return <div className="label visual-label">
+        {visualElements.map(element => {
+          const text = renderLine(element.text, record);
+          if (!text) return null;
+          return <div
+            key={element.id}
+            className={'visual-element' + (editing && selectedVisualId === element.id ? ' is-selected' : '')}
+            style={{
+              left: element.x + 'mm',
+              top: element.y + 'mm',
+              width: element.width + 'mm',
+              height: element.height + 'mm',
+              fontSize: (Number(element.fontSize) || 11) + 'pt',
+              fontWeight: element.bold ? 700 : 400,
+              textAlign: element.align || 'left',
+              justifyContent: element.align === 'center' ? 'center' : element.align === 'right' ? 'flex-end' : 'flex-start'
+            }}
+            onPointerDown={editing ? event => {
+              event.preventDefault();
+              event.currentTarget.setPointerCapture(event.pointerId);
+              setSelectedVisualId(element.id);
+              setVisualDrag({ id: element.id, startClientX: event.clientX, startClientY: event.clientY, startX: Number(element.x), startY: Number(element.y) });
+            } : undefined}
+            onPointerMove={editing ? event => moveVisualElement(event, element) : undefined}
+            onPointerUp={editing ? () => setVisualDrag(null) : undefined}
+            onPointerCancel={editing ? () => setVisualDrag(null) : undefined}
+            title={editing ? 'Drag to position this element' : undefined}
+          >{text}</div>;
+        })}
+      </div>;
+    }
     return <div className="label">{getLabelLines(record).map(line => <div className={'label-line' + (line.bold ? ' bold' : '')} key={line.id}>{line.text}</div>)}</div>;
   }
   function validateForOutput(source) {
@@ -273,21 +375,41 @@ export default function App() {
         const row = Math.floor(pagePosition / columns);
         const x = startX + column * (labelWidth + gapX);
         const y = startY + row * (labelHeight + gapY);
-        const content = getLabelLines(record).map(line => ({ ...line, wrapped: doc.splitTextToSize(String(line.text), contentWidth) }));
-        const totalHeight = content.reduce((sum, line) => sum + line.wrapped.length * lineHeight + lineGap, 0);
-        let baseline = settings.vertical === 'top'
-          ? y + padding + fontHeight
-          : settings.vertical === 'bottom'
-            ? y + labelHeight - padding - totalHeight + fontHeight
-            : y + (labelHeight - totalHeight) / 2 + fontHeight;
-        const align = settings.alignment;
-        const textX = align === 'left' ? x + padding : align === 'right' ? x + labelWidth - padding : x + labelWidth / 2;
-        content.forEach(line => {
-          doc.setFont('helvetica', line.bold ? 'bold' : 'normal');
-          doc.setFontSize(fontSize);
-          line.wrapped.forEach(part => { doc.text(part, textX, baseline, { align }); baseline += lineHeight; });
-          baseline += lineGap;
-        });
+        if (visualLayout) {
+          visualElements.forEach(element => {
+            const text = renderLine(element.text, record);
+            if (!text) return;
+            const elementFont = Number(element.fontSize) || fontSize;
+            const elementWidth = Math.max(2, Number(element.width) - 1);
+            const wrapped = doc.splitTextToSize(text, elementWidth);
+            const elementAlign = element.align || 'left';
+            const textX = x + Number(element.x) + (elementAlign === 'center' ? Number(element.width) / 2 : elementAlign === 'right' ? Number(element.width) : 0);
+            const lineHeightForElement = elementFont * 0.3528 * 1.2;
+            let elementY = y + Number(element.y) + elementFont * 0.3528;
+            doc.setFont('helvetica', element.bold ? 'bold' : 'normal');
+            doc.setFontSize(elementFont);
+            wrapped.forEach(part => {
+              doc.text(part, textX, elementY, { align: elementAlign });
+              elementY += lineHeightForElement;
+            });
+          });
+        } else {
+          const content = getLabelLines(record).map(line => ({ ...line, wrapped: doc.splitTextToSize(String(line.text), contentWidth) }));
+          const totalHeight = content.reduce((sum, line) => sum + line.wrapped.length * lineHeight + lineGap, 0);
+          let baseline = settings.vertical === 'top'
+            ? y + padding + fontHeight
+            : settings.vertical === 'bottom'
+              ? y + labelHeight - padding - totalHeight + fontHeight
+              : y + (labelHeight - totalHeight) / 2 + fontHeight;
+          const align = settings.alignment;
+          const textX = align === 'left' ? x + padding : align === 'right' ? x + labelWidth - padding : x + labelWidth / 2;
+          content.forEach(line => {
+            doc.setFont('helvetica', line.bold ? 'bold' : 'normal');
+            doc.setFontSize(fontSize);
+            line.wrapped.forEach(part => { doc.text(part, textX, baseline, { align }); baseline += lineHeight; });
+            baseline += lineGap;
+          });
+        }
       });
       doc.save('custom-labels' + (mode === 'selected' ? '-selected' : '') + '.pdf');
       setStatus({ type: 'success', text: source.length + ' labels exported to PDF.' });
@@ -303,7 +425,7 @@ export default function App() {
     const name = templateName.trim();
     if (!name) { setStatus({ type: 'error', text: 'Enter a name for this template.' }); return; }
     const id = 'tpl-' + Date.now();
-    const template = { id, name, customLayout, fields, lines, settings, savedAt: new Date().toISOString() };
+    const template = { id, name, customLayout, fields, lines, settings, visualLayout, visualElements, savedAt: new Date().toISOString() };
     setSavedTemplates(old => [template, ...old.filter(item => item.name.toLowerCase() !== name.toLowerCase())]);
     setSelectedTemplateId(id);
     setStatus({ type: 'success', text: 'Template "' + name + '" saved in this browser.' });
@@ -319,6 +441,9 @@ export default function App() {
     setFields(mappedFields);
     setLines(template.lines || []);
     setCustomLayout(Boolean(template.customLayout));
+    setVisualLayout(Boolean(template.visualLayout));
+    setVisualElements(template.visualElements || []);
+    setSelectedVisualId(template.visualElements?.[0]?.id || '');
     setSettings({ ...defaults, ...template.settings });
     setTemplateName(template.name);
     setStatus({ type: 'success', text: 'Template "' + template.name + '" applied.' });
@@ -373,6 +498,54 @@ export default function App() {
         <p className="hint">Use <code>{'{@Column Heading}'}</code> for Excel values and <code>{'{@relationship}'}</code> for D/o or S/o based on Gender. Add fixed text around placeholders. Empty values are omitted automatically. Drag the numbered handle to reorder lines.</p>
         <button className="button add-line" onClick={addLine}><Plus size={15}/> Add label line</button>
       </>}
+      <div className="visual-toggle-row">
+        <label className="toggle"><input type="checkbox" checked={visualLayout} onChange={e => enableVisualLayout(e.target.checked)}/> Use visual canvas designer</label>
+        <span>Place each text element anywhere inside the label.</span>
+      </div>
+      {visualLayout && <div className="visual-designer">
+        <div className="visual-editor-toolbar">
+          <select value={newVisualField} onChange={e => setNewVisualField(e.target.value)}>
+            <option value="">Choose Excel field…</option>
+            {headers.map(header => <option key={header} value={header}>{header}</option>)}
+          </select>
+          <button className="button outline" disabled={!newVisualField} onClick={() => { createVisualElement('{@' + newVisualField + '}'); setNewVisualField(''); }}>Add field</button>
+          <button className="button secondary" onClick={() => createVisualElement('Custom text')}>Add text</button>
+        </div>
+        <div className="visual-editor-grid">
+          <div className="visual-canvas-wrap">
+            <div className="visual-canvas-caption">Drag elements to position them · measurements in mm</div>
+            {renderLabel(records[0] || sampleRows[0], true)}
+          </div>
+          <div className="visual-properties">
+            {!visualElements.length ? <div className="empty">Add a field or text element to begin designing.</div> : <>
+              <label>Element
+                <select value={selectedVisualId} onChange={e => setSelectedVisualId(e.target.value)}>
+                  {visualElements.map((element, index) => <option key={element.id} value={element.id}>Element {index + 1}: {element.text.slice(0, 24)}</option>)}
+                </select>
+              </label>
+              {(() => {
+                const element = visualElements.find(item => item.id === selectedVisualId);
+                if (!element) return <div className="empty">Select an element to edit its properties.</div>;
+                return <>
+                  <label>Text / field placeholders
+                    <input value={element.text} onChange={e => updateVisualElement(element.id, { text: e.target.value })}/>
+                  </label>
+                  <div className="visual-number-grid">
+                    <label>X position (mm)<input type="number" step="0.5" min="0" max={settings.labelWidth} value={element.x} onChange={e => updateVisualElement(element.id, { x: Math.max(0, Math.min(Number(settings.labelWidth) - Number(element.width), Number(e.target.value))) })}/></label>
+                    <label>Y position (mm)<input type="number" step="0.5" min="0" max={settings.labelHeight} value={element.y} onChange={e => updateVisualElement(element.id, { y: Math.max(0, Math.min(Number(settings.labelHeight) - Number(element.height), Number(e.target.value))) })}/></label>
+                    <label>Width (mm)<input type="number" step="0.5" min="2" max={settings.labelWidth} value={element.width} onChange={e => updateVisualElement(element.id, { width: Math.max(2, Math.min(Number(settings.labelWidth) - Number(element.x), Number(e.target.value))) })}/></label>
+                    <label>Height (mm)<input type="number" step="0.5" min="2" max={settings.labelHeight} value={element.height} onChange={e => updateVisualElement(element.id, { height: Math.max(2, Math.min(Number(settings.labelHeight) - Number(element.y), Number(e.target.value))) })}/></label>
+                    <label>Font size (pt)<input type="number" min="5" max="36" value={element.fontSize} onChange={e => updateVisualElement(element.id, { fontSize: Math.max(5, Math.min(36, Number(e.target.value))) })}/></label>
+                    <label>Alignment<select value={element.align} onChange={e => updateVisualElement(element.id, { align: e.target.value })}><option value="left">Left</option><option value="center">Center</option><option value="right">Right</option></select></label>
+                  </div>
+                  <label className="bold-toggle visual-bold"><input type="checkbox" checked={element.bold} onChange={e => updateVisualElement(element.id, { bold: e.target.checked })}/> Bold text</label>
+                  <button className="button danger-button" onClick={() => removeVisualElement(element.id)}><Trash2 size={14}/> Remove element</button>
+                </>;
+              })()}
+            </>}
+          </div>
+        </div>
+      </div>}
     </section>
 
     <div className="columns-layout"><section className="panel fields-panel"><div className="section-title"><span className="step">03</span><div><h2>Choose label content</h2><p>Select fields for simple labels.</p></div><span className="selected-count">{enabledFields.length} selected</span></div>{!headers.length ? <div className="empty">Upload a spreadsheet to see its columns.</div> : <div className="field-list">{fields.map(field => <label className="field-item" key={field.id}><input type="checkbox" checked={field.enabled} onChange={() => toggleField(field.id)}/><span>{field.label}</span></label>)}</div>}</section>
@@ -417,7 +590,7 @@ export default function App() {
       </div>
     </section>
 
-    <section className="panel preview-panel"><div className="section-title"><span className="step">06</span><div><h2>Live label preview</h2><p>Preview updates as you change content and layout.</p></div><span className="live-tag"><Eye size={14}/> LIVE PREVIEW</span><button className="button outline print-button" onClick={() => exportPdf('all')}><FileSpreadsheet size={15}/> PDF</button><button className="button primary print-button" onClick={() => printLabels('all')}><Printer size={15}/> Print all</button></div>
+    <section className="panel preview-panel"><div className="section-title"><span className="step">06</span><div><h2>Live label preview</h2><p>Preview updates as you change content and layout, including visual element positions.</p></div><span className="live-tag"><Eye size={14}/> LIVE PREVIEW</span><button className="button outline print-button" onClick={() => exportPdf('all')}><FileSpreadsheet size={15}/> PDF</button><button className="button primary print-button" onClick={() => printLabels('all')}><Printer size={15}/> Print all</button></div>
       {!records.length ? <div className="empty">Your labels will appear here after you upload a file.</div> : customLayout && !lines.some(line => line.text.trim()) ? <div className="empty">Add at least one custom line to preview.</div> : <><div className="preview-sheet"><div className="preview-grid">{previewRecords.map((record, index) => <React.Fragment key={index}>{renderLabel(record)}</React.Fragment>)}</div></div><div className="preview-footer">Showing {previewRecords.length} of {records.length} labels{records.length > 8 && <button className="text-button" onClick={() => setShowAll(value => !value)}>{showAll ? 'Show fewer' : 'Show more'}</button>}</div></>}
     </section>
 

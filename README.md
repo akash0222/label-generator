@@ -30,6 +30,8 @@ npm run preview
 - Save and reuse named label templates in the browser.
 - Export generated labels directly to PDF or Excel.
 - Drag the line-number handle to reorder custom label lines.
+- Optional visual canvas designer: add field/text elements, drag to position, and adjust X/Y, width, height, font size, weight, and alignment.
+- Save visual layouts in reusable templates. Visual positioning is respected by print and PDF output.
 - Switch between worksheets in a multi-sheet workbook.
 - Select individual records for printing and exports.
 - Persist page and label settings between visits.
