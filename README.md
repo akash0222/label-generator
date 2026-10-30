@@ -64,3 +64,28 @@ PDF export creates a downloadable PDF using the configured paper size, label dim
 ## Printing
 
 Choose the same paper size and orientation in the browser print dialog. Set scale to 100% / Actual size and disable browser headers and footers. Test on plain paper before using label stock; printer margins and sheet tolerances may require small adjustments.
+
+## Automated regression tests
+
+The project uses Playwright end-to-end tests for the core label-production workflow.
+
+Install dependencies and the Chromium browser:
+
+```bash
+npm install
+npx playwright install chromium
+```
+
+Run the desktop and mobile regression suites:
+
+```bash
+npm run test:e2e
+```
+
+Run with a visible browser:
+
+```bash
+npm run test:e2e:headed
+```
+
+The tests cover CSV import, sample data, label preview, saved templates, design-page operations, print-sheet calibration and fit validation, print queue calculations, PDF downloads, QR generation, and mobile layout. GitHub Actions runs the production build and regression suite on pushes to `main` and pull requests targeting `main`.
