@@ -46,11 +46,13 @@ function QrCodeVisual({ value, foreground = '#111111', background = '#ffffff' })
 function BarcodeVisual({ value, format = 'CODE128', foreground = '#111111', background = '#ffffff', displayValue = true }) {
   const svgRef = useRef(null);
   const [error, setError] = useState('');
+  const [ready, setReady] = useState(false);
   useEffect(() => {
     let active = true;
     setError('');
+    setReady(false);
     if (svgRef.current) svgRef.current.replaceChildren();
-    if (!value || !svgRef.current) return () => { active = false; };
+    if (!value || !svgRef.current) { setReady(true); return () => { active = false; }; }
     (async () => {
       try {
         const module = await import('jsbarcode');
@@ -66,14 +68,17 @@ function BarcodeVisual({ value, format = 'CODE128', foreground = '#111111', back
           fontSize: 11,
           margin: 2
         });
+        if (active) setReady(true);
       } catch (err) {
-        if (active) setError(err.message || 'Barcode value or format is invalid.');
+        if (active) { setError(err.message || 'Barcode value or format is invalid.'); setReady(true); }
       }
     })();
     return () => { active = false; };
   }, [value, format, foreground, background, displayValue]);
   return <div className="barcode-visual">
-    {error ? <span className="code-error" title={error}>Barcode error</span> : <svg ref={svgRef} className="generated-code barcode-svg" role="img" aria-label="Barcode"/>}
+    <svg ref={svgRef} className="generated-code barcode-svg" role="img" aria-label="Barcode"/>
+    {error && <span className="code-error" title={error}>Barcode error</span>}
+    <span className="code-loading" hidden={ready}>Barcode…</span>
   </div>;
 }
 
@@ -130,7 +135,7 @@ function getPageMetricsForSettings(settings) {
 }
 
 function readInitialProjectState() {
-  const fallbackPage = { id: 'design-1', name: 'Design 1', visualElements: [], labelBackground: '', settings: defaults, visualLayout: true };
+  const fallbackPage = { id: 'design-1', name: 'Design 1', visualElements: [], labelBackground: '', settings: defaults, visualLayout: true, fields: [], lines: [], customLayout: false };
   const numberOr = (value, fallback) => Number.isFinite(Number(value)) ? Number(value) : fallback;
   let pages = [];
   let templates = [];
@@ -155,7 +160,21 @@ function readInitialProjectState() {
         })) : [],
         labelBackground: typeof page.labelBackground === 'string' ? page.labelBackground : '',
         settings: page.settings && typeof page.settings === 'object' ? normalizeSettings(page.settings) : null,
-        visualLayout: page.visualLayout == null ? Boolean(page.visualElements?.length) : Boolean(page.visualLayout)
+        visualLayout: page.visualLayout == null ? Boolean(page.visualElements?.length) : Boolean(page.visualLayout),
+        fields: Array.isArray(page.fields) ? page.fields.filter(field => field && typeof field === 'object').map((field, fieldIndex) => ({
+          id: String(field.id || 'field-' + index + '-' + fieldIndex),
+          label: String(field.label || ''),
+          enabled: Boolean(field.enabled),
+          bold: Boolean(field.bold),
+          prefix: String(field.prefix ?? ''),
+          suffix: String(field.suffix ?? '')
+        })) : [],
+        lines: Array.isArray(page.lines) ? page.lines.filter(line => line && typeof line === 'object').map((line, lineIndex) => ({
+          id: String(line.id || 'line-' + index + '-' + lineIndex),
+          text: String(line.text ?? ''),
+          bold: Boolean(line.bold)
+        })) : [],
+        customLayout: Boolean(page.customLayout)
       }));
     }
     const parsedTemplates = JSON.parse(localStorage.getItem('label-generator-templates-v1') || '[]');
@@ -176,6 +195,9 @@ function readInitialProjectState() {
     visualElements: activePage.visualElements || [],
     labelBackground: activePage.labelBackground || '',
     visualLayout: Boolean(activePage.visualLayout),
+    fields: activePage.fields || [],
+    lines: activePage.lines || [],
+    customLayout: Boolean(activePage.customLayout),
     activeDesignPageId: activePage.id,
     designPageName: activePage.name || 'Design 1'
   };
@@ -187,9 +209,9 @@ export default function App() {
   const initialProject = initialProjectRef.current;
   const [records, setRecords] = useState([]);
   const [headers, setHeaders] = useState([]);
-  const [fields, setFields] = useState([]);
-  const [lines, setLines] = useState([]);
-  const [customLayout, setCustomLayout] = useState(false);
+  const [fields, setFields] = useState(() => initialProject.fields);
+  const [lines, setLines] = useState(() => initialProject.lines);
+  const [customLayout, setCustomLayout] = useState(() => initialProject.customLayout);
   const [settings, setSettings] = useState(() => normalizeSettings(initialProject.settings));
   const [fileName, setFileName] = useState('');
   const [status, setStatus] = useState({ type: 'info', text: 'Upload an Excel/CSV file or load sample data to begin.' });
@@ -253,8 +275,8 @@ export default function App() {
     return out;
   }, [printSource, perPage]);
   const currentDesignPages = useMemo(() => designPages.map(page => page.id === activeDesignPageId
-    ? { ...page, name: designPageName, visualElements, labelBackground, settings: normalizeSettings(settings), visualLayout }
-    : page), [designPages, activeDesignPageId, designPageName, visualElements, labelBackground, settings, visualLayout]);
+    ? { ...page, name: designPageName, visualElements, labelBackground, settings: normalizeSettings(settings), visualLayout, fields, lines, customLayout }
+    : page), [designPages, activeDesignPageId, designPageName, visualElements, labelBackground, settings, visualLayout, fields, lines, customLayout]);
   const queuedPrintJobs = useMemo(() => printQueue.map(item => {
     const design = currentDesignPages.find(page => page.id === item.designPageId);
     if (!design) return { ...item, missing: true, name: 'Missing design', records: [], copies: 1 };
@@ -267,7 +289,9 @@ export default function App() {
         ['rectangle', 'circle', 'line'].includes(element.type)
         || (element.type === 'logo' && Boolean(element.imageSrc))
         || Boolean(String(element.text ?? '').trim()))
-      : hasLabelContent;
+      : design.customLayout
+        ? (design.lines || []).some(line => String(line.text ?? '').trim())
+        : (design.fields || []).some(field => field.enabled);
     return { ...item, design, settings: designSettings, metrics, name: design.name, records: sourceRecords, copies, content, sheetCount: Math.ceil(sourceRecords.length / metrics.perPage) * copies };
   }), [printQueue, currentDesignPages, records, selectedRecords, hasLabelContent]);
   const printSheets = useMemo(() => {
@@ -320,9 +344,9 @@ export default function App() {
   }, [designPages, activeDesignPageId]);
   useEffect(() => {
     setDesignPages(old => old.map(page => page.id === activeDesignPageId
-      ? { ...page, name: designPageName, visualElements, labelBackground, settings: normalizeSettings(settings), visualLayout }
+      ? { ...page, name: designPageName, visualElements, labelBackground, settings: normalizeSettings(settings), visualLayout, fields, lines, customLayout }
       : page));
-  }, [visualElements, labelBackground, settings, visualLayout, activeDesignPageId, designPageName]);
+  }, [visualElements, labelBackground, settings, visualLayout, activeDesignPageId, designPageName, fields, lines, customLayout]);
 
   useEffect(() => {
     const presets = { A3: [297, 420], A4: [210, 297], A5: [148, 210], Letter: [215.9, 279.4], Legal: [215.9, 355.6] };
@@ -338,6 +362,53 @@ export default function App() {
     }).join(' ');
     style.textContent = '@media print { @page { size: ' + w + 'mm ' + h + 'mm; margin: ' + Number(settings.printMarginTop || 0) + 'mm ' + Number(settings.printMarginSide || 0) + 'mm; } ' + namedPages + ' }';
   }, [settings.pageSize, settings.orientation, settings.customPageWidth, settings.customPageHeight, settings.printMarginTop, settings.printMarginSide, queuedPrintJobs, printRunJobs]);
+
+  useEffect(() => {
+    if (!printRunJobs?.length || !printSheets.length) return undefined;
+    let cancelled = false;
+    const wait = ms => new Promise(resolve => window.setTimeout(resolve, ms));
+    const prepareAndPrint = async () => {
+      const root = document.querySelector('.print-document');
+      if (!root) {
+        setStatus({ type: 'error', text: 'Print preview could not be prepared. Please try again.' });
+        setPrintRunJobs(null);
+        return;
+      }
+      const deadline = Date.now() + 8000;
+      while (root.querySelector('.code-loading:not([hidden])') && Date.now() < deadline && !cancelled) {
+        await wait(60);
+      }
+      if (cancelled) return;
+      if (root.querySelector('.code-loading:not([hidden])')) {
+        setStatus({ type: 'error', text: 'A QR code or barcode is still loading. Please retry printing.' });
+        setPrintRunJobs(null);
+        return;
+      }
+      try {
+        const images = Array.from(root.querySelectorAll('img'));
+        await Promise.all(images.map(image => {
+          if (image.complete) return image.naturalWidth > 0 ? Promise.resolve() : Promise.reject(new Error('A label image could not be loaded.'));
+          return new Promise((resolve, reject) => {
+            const timeout = window.setTimeout(() => reject(new Error('A label image took too long to load.')), 5000);
+            image.addEventListener('load', () => { window.clearTimeout(timeout); resolve(); }, { once: true });
+            image.addEventListener('error', () => { window.clearTimeout(timeout); reject(new Error('A label image could not be loaded.')); }, { once: true });
+          });
+        }));
+        if (document.fonts?.ready) await document.fonts.ready;
+      } catch (error) {
+        if (!cancelled) {
+          setStatus({ type: 'error', text: error.message || 'Print assets could not be prepared.' });
+          setPrintRunJobs(null);
+        }
+        return;
+      }
+      if (cancelled) return;
+      window.addEventListener('afterprint', () => setPrintRunJobs(null), { once: true });
+      window.print();
+    };
+    prepareAndPrint();
+    return () => { cancelled = true; };
+  }, [printRunJobs, printSheets]);
 
   function applyWorksheet(book, sheetName, sourceName, XLSX) {
     const sheet = book.Sheets[sheetName];
@@ -369,8 +440,22 @@ export default function App() {
     setSelectedIndexes(data.map((_, index) => index));
     setRecordSearch('');
     setRecordPage(0);
-    setFields(columnNames.map((h, i) => ({ id: 'f' + i, label: h, enabled: i < 2, bold: i === 0, prefix: '', suffix: '' })));
-    setLines(columnNames.slice(0, 2).map((h, i) => ({ id: 'l' + i, text: '{@' + h + '}', bold: i === 0 })));
+    const mappedFields = columnNames.map((heading, index) => {
+      const saved = fields.find(field => norm(field.label) === norm(heading));
+      return {
+        id: 'f' + index,
+        label: heading,
+        enabled: saved?.enabled ?? index < 2,
+        bold: saved?.bold ?? index === 0,
+        prefix: saved?.prefix ?? '',
+        suffix: saved?.suffix ?? ''
+      };
+    });
+    const nextLines = lines.length
+      ? lines
+      : columnNames.slice(0, 2).map((heading, index) => ({ id: 'l' + index, text: '{@' + heading + '}', bold: index === 0 }));
+    setFields(mappedFields);
+    setLines(nextLines);
     setCustomLayout(false);
     setShowAll(false);
     setPrintSelectionOnly(false);
@@ -455,9 +540,12 @@ export default function App() {
           align: element.align || 'left'
         })).filter(line => line.text);
     }
-    return customLayout
-      ? lines.map(line => ({ id: line.id, text: renderLine(line.text, record), bold: line.bold })).filter(line => line.text)
-      : enabledFields.map(field => ({ id: field.id, text: (field.prefix || '') + (getValue(record, field.label) || '') + (field.suffix || ''), bold: field.bold })).filter(line => line.text);
+    const activeCustomLayout = designOverride?.customLayout ?? customLayout;
+    const activeLines = designOverride?.lines ?? lines;
+    const activeFields = designOverride?.fields ?? enabledFields;
+    return activeCustomLayout
+      ? activeLines.map(line => ({ id: line.id, text: renderLine(line.text, record), bold: line.bold })).filter(line => line.text)
+      : activeFields.filter(field => field.enabled).map(field => ({ id: field.id, text: (field.prefix || '') + (getValue(record, field.label) || '') + (field.suffix || ''), bold: field.bold })).filter(line => line.text);
   }
   function createVisualElement(text, type = 'text') {
     const index = visualElements.length;
@@ -580,7 +668,7 @@ export default function App() {
     }
   }
   function saveCurrentDesignPage() {
-    return designPages.map(page => page.id === activeDesignPageId ? { ...page, name:designPageName, visualElements, labelBackground, settings, visualLayout } : page);
+    return designPages.map(page => page.id === activeDesignPageId ? { ...page, name:designPageName, visualElements, labelBackground, settings, visualLayout, fields, lines, customLayout } : page);
   }
   function switchDesignPage(id) {
     if (id === activeDesignPageId) return;
@@ -591,14 +679,16 @@ export default function App() {
     setActiveDesignPageId(id); setDesignPageName(target.name);
     setVisualElements(target.visualElements || []); setLabelBackground(target.labelBackground || '');
     setSettings(normalizeSettings(target.settings)); setVisualLayout(Boolean(target.visualLayout));
+    setFields(target.fields || []); setLines(target.lines || []); setCustomLayout(Boolean(target.customLayout));
     setSelectedVisualId(target.visualElements?.[0]?.id || ''); setVisualDrag(null);
   }
   function addDesignPage() {
     const pages = saveCurrentDesignPage(), id = 'design-' + Date.now();
-    const page = { id, name:'Design ' + (pages.length+1), visualElements:[], labelBackground:'', settings:normalizeSettings(settings), visualLayout:true };
+    const page = { id, name:'Design ' + (pages.length+1), visualElements:[], labelBackground:'', settings:normalizeSettings(settings), visualLayout:true, fields:[], lines:[], customLayout:false };
     setDesignPages([...pages,page]);
     setActiveDesignPageId(id); setDesignPageName(page.name);
     setVisualElements([]); setLabelBackground(''); setVisualLayout(true); setSelectedVisualId('');
+    setFields([]); setLines([]); setCustomLayout(false);
     setStatus({type:'success',text:'New design page created.'});
   }
   function duplicateDesignPage() {
@@ -610,6 +700,7 @@ export default function App() {
     setActiveDesignPageId(id); setDesignPageName(copy.name); setVisualElements(copy.visualElements);
     setLabelBackground(copy.labelBackground||''); setSettings(normalizeSettings(copy.settings));
     setVisualLayout(Boolean(copy.visualLayout)); setSelectedVisualId(copy.visualElements[0]?.id||'');
+    setFields(copy.fields || []); setLines(copy.lines || []); setCustomLayout(Boolean(copy.customLayout));
     setStatus({type:'success',text:'Design page duplicated.'});
   }
   function deleteDesignPage() {
@@ -620,6 +711,7 @@ export default function App() {
     setActiveDesignPageId(target.id); setDesignPageName(target.name); setVisualElements(target.visualElements||[]);
     setLabelBackground(target.labelBackground||''); setSettings(normalizeSettings(target.settings));
     setVisualLayout(Boolean(target.visualLayout)); setSelectedVisualId(target.visualElements?.[0]?.id||'');
+    setFields(target.fields || []); setLines(target.lines || []); setCustomLayout(Boolean(target.customLayout));
   }
   function applyStarterTemplate(kind) {
     const width=Number(settings.labelWidth), height=Number(settings.labelHeight), full=Math.max(10,width-6);
@@ -692,7 +784,7 @@ export default function App() {
         </div>;
       })}
     </div>;
-    return <div className="label">{getLabelLines(record).map(line=><div className={'label-line'+(line.bold?' bold':'')} key={line.id}>{line.text}</div>)}</div>;
+    return <div className="label">{getLabelLines(record, designOverride).map(line=><div className={'label-line'+(line.bold?' bold':'')} key={line.id}>{line.text}</div>)}</div>;
   }
   function validateForOutput(source) {
     if (!Array.isArray(source) || !source.length) { setStatus({ type: 'error', text: 'No records are selected for this action.' }); return false; }
@@ -733,10 +825,6 @@ export default function App() {
   function printQueuedDesigns() {
     if (!validatePrintJobs(queuedPrintJobs)) return;
     setPrintRunJobs(queuedPrintJobs);
-    window.setTimeout(() => {
-      window.addEventListener('afterprint', () => setPrintRunJobs(null), { once: true });
-      window.print();
-    }, 120);
   }
   function printLabels(mode = 'all') {
     const source = mode === 'selected' ? selectedRecords : records;
@@ -755,10 +843,6 @@ export default function App() {
     setPrintSelectionOnly(mode === 'selected');
     if (!validatePrintJobs(directJob)) return;
     setPrintRunJobs(directJob);
-    window.setTimeout(() => {
-      window.addEventListener('afterprint', () => setPrintRunJobs(null), { once: true });
-      window.print();
-    }, 120);
   }
   function printCalibrationTest() {
     if (!pageMetrics.valid || !pageMetrics.fits) {
@@ -1027,8 +1111,9 @@ export default function App() {
       setActiveDesignPageId(active.id);setDesignPageName(active.name||'Design 1');
       setVisualElements(active.visualElements||[]);setLabelBackground(active.labelBackground||'');
       setSettings(normalizeSettings(active.settings || template.settings));setVisualLayout(Boolean(active.visualLayout));
+      setFields(active.fields || mappedFields); setLines(active.lines || template.lines || []); setCustomLayout(Boolean(active.customLayout ?? template.customLayout));
     } else {
-      setDesignPages([{id:'design-1',name:'Design 1',visualElements:template.visualElements||[],labelBackground:template.labelBackground||'',settings:{...defaults,...template.settings},visualLayout:Boolean(template.visualLayout)}]);
+      setDesignPages([{id:'design-1',name:'Design 1',visualElements:template.visualElements||[],labelBackground:template.labelBackground||'',settings:{...defaults,...template.settings},visualLayout:Boolean(template.visualLayout),fields:mappedFields,lines:template.lines||[],customLayout:Boolean(template.customLayout)}]);
       setActiveDesignPageId('design-1');setDesignPageName('Design 1');
     }
     if (!template.designPages?.length) setSettings(normalizeSettings(template.settings));
