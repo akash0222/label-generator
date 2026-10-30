@@ -76,16 +76,68 @@ function BarcodeVisual({ value, format = 'CODE128', foreground = '#111111', back
   </div>;
 }
 
+function readInitialProjectState() {
+  const fallbackPage = { id: 'design-1', name: 'Design 1', visualElements: [], labelBackground: '', settings: defaults, visualLayout: true };
+  const numberOr = (value, fallback) => Number.isFinite(Number(value)) ? Number(value) : fallback;
+  let pages = [];
+  let templates = [];
+  let storedSettings = {};
+  let activeId = '';
+  try {
+    const parsedPages = JSON.parse(localStorage.getItem('label-generator-design-pages-v1') || 'null');
+    if (Array.isArray(parsedPages)) {
+      pages = parsedPages.filter(page => page && typeof page === 'object').map((page, index) => ({
+        ...page,
+        id: String(page.id || 'design-' + (index + 1)),
+        name: String(page.name || 'Design ' + (index + 1)),
+        visualElements: Array.isArray(page.visualElements) ? page.visualElements.filter(Boolean).map((element, elementIndex) => ({
+          ...element,
+          id: String(element.id || 'design-element-' + index + '-' + elementIndex),
+          type: String(element.type || 'text'),
+          text: String(element.text ?? ''),
+          x: numberOr(element.x, 3),
+          y: numberOr(element.y, 3),
+          width: Math.max(1, numberOr(element.width, 20)),
+          height: Math.max(1, numberOr(element.height, 6))
+        })) : [],
+        labelBackground: typeof page.labelBackground === 'string' ? page.labelBackground : '',
+        settings: { ...defaults, ...(page.settings && typeof page.settings === 'object' ? page.settings : {}) },
+        visualLayout: page.visualLayout == null ? Boolean(page.visualElements?.length) : Boolean(page.visualLayout)
+      }));
+    }
+    const parsedTemplates = JSON.parse(localStorage.getItem('label-generator-templates-v1') || '[]');
+    if (Array.isArray(parsedTemplates)) templates = parsedTemplates.filter(item => item && typeof item === 'object' && item.id && item.name);
+    const parsedSettings = JSON.parse(localStorage.getItem('label-generator-settings-v1') || '{}');
+    if (parsedSettings && typeof parsedSettings === 'object' && !Array.isArray(parsedSettings)) storedSettings = parsedSettings;
+    activeId = localStorage.getItem('label-generator-active-design-page-v1') || '';
+  } catch {
+    // Browser storage can be blocked, malformed, or unavailable.
+  }
+  if (!pages.length) pages = [fallbackPage];
+  const activePage = pages.find(page => page.id === activeId) || pages[0];
+  return {
+    pages,
+    activePage,
+    templates,
+    settings: { ...defaults, ...(activePage.settings || storedSettings) },
+    visualElements: activePage.visualElements || [],
+    labelBackground: activePage.labelBackground || '',
+    visualLayout: Boolean(activePage.visualLayout),
+    activeDesignPageId: activePage.id,
+    designPageName: activePage.name || 'Design 1'
+  };
+}
+
 export default function App() {
+  const initialProjectRef = useRef(null);
+  if (!initialProjectRef.current) initialProjectRef.current = readInitialProjectState();
+  const initialProject = initialProjectRef.current;
   const [records, setRecords] = useState([]);
   const [headers, setHeaders] = useState([]);
   const [fields, setFields] = useState([]);
   const [lines, setLines] = useState([]);
   const [customLayout, setCustomLayout] = useState(false);
-  const [settings, setSettings] = useState(() => {
-    try { return { ...defaults, ...(JSON.parse(localStorage.getItem('label-generator-settings-v1')) || {}) }; }
-    catch { return defaults; }
-  });
+  const [settings, setSettings] = useState(() => initialProject.settings);
   const [fileName, setFileName] = useState('');
   const [status, setStatus] = useState({ type: 'info', text: 'Upload an Excel/CSV file or load sample data to begin.' });
   const [showAll, setShowAll] = useState(false);
@@ -97,25 +149,18 @@ export default function App() {
   const [printSelectionOnly, setPrintSelectionOnly] = useState(false);
   const [printTestMode, setPrintTestMode] = useState(false);
   const [templateName, setTemplateName] = useState('');
-  const [savedTemplates, setSavedTemplates] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('label-generator-templates-v1')) || []; }
-    catch { return []; }
-  });
+  const [savedTemplates, setSavedTemplates] = useState(() => initialProject.templates);
   const [selectedTemplateId, setSelectedTemplateId] = useState('');
   const [draggingLine, setDraggingLine] = useState(null);
-  const [visualLayout, setVisualLayout] = useState(false);
-  const [visualElements, setVisualElements] = useState([]);
-  const [selectedVisualId, setSelectedVisualId] = useState('');
+  const [visualLayout, setVisualLayout] = useState(() => initialProject.visualLayout);
+  const [visualElements, setVisualElements] = useState(() => initialProject.visualElements);
+  const [selectedVisualId, setSelectedVisualId] = useState(() => initialProject.visualElements[0]?.id || '');
   const [visualDrag, setVisualDrag] = useState(null);
   const [newVisualField, setNewVisualField] = useState('');
-  const [labelBackground, setLabelBackground] = useState('');
-  const [designPages, setDesignPages] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('label-generator-design-pages-v1')) || [{ id:'design-1', name:'Design 1', visualElements:[], labelBackground:'', settings:defaults, visualLayout:true }]; }
-    catch { return [{ id:'design-1', name:'Design 1', visualElements:[], labelBackground:'', settings:defaults, visualLayout:true }]; }
-  });
-  const [activeDesignPageId, setActiveDesignPageId] = useState('design-1');
-  const [designPageName, setDesignPageName] = useState('Design 1');
-  const skipDesignSyncRef = useRef(false);
+  const [labelBackground, setLabelBackground] = useState(() => initialProject.labelBackground);
+  const [designPages, setDesignPages] = useState(() => initialProject.pages);
+  const [activeDesignPageId, setActiveDesignPageId] = useState(() => initialProject.activeDesignPageId);
+  const [designPageName, setDesignPageName] = useState(() => initialProject.designPageName);
   const backgroundInputRef = useRef(null);
   const logoInputRef = useRef(null);
   const fileRef = useRef(null);
@@ -157,6 +202,14 @@ export default function App() {
     return { valid, fits: fitsWidth && fitsHeight, pageWidth, pageHeight, printableWidth, printableHeight, gridWidth, gridHeight, gridStartX, gridStartY, printMarginTop, printMarginSide, printOffsetX, printOffsetY, fitsWidth, fitsHeight };
   }, [settings]);
   const previewRecords = records.slice(0, showAll ? 48 : 8);
+  const hasLabelContent = visualLayout
+    ? Boolean(labelBackground) || visualElements.some(element =>
+      ['rectangle', 'circle', 'line'].includes(element.type)
+      || (element.type === 'logo' && Boolean(element.imageSrc))
+      || Boolean(String(element.text ?? '').trim()))
+    : customLayout
+      ? lines.some(line => String(line.text ?? '').trim())
+      : enabledFields.length > 0;
   const setSetting = (key, value) => setSettings(old => ({ ...old, [key]: value }));
   const selectedRecords = useMemo(() => records.filter((_, index) => selectedIndexes.includes(index)), [records, selectedIndexes]);
   const printSource = printSelectionOnly ? selectedRecords : records;
@@ -181,10 +234,14 @@ export default function App() {
   }, [savedTemplates]);
 
   useEffect(() => {
-    try { localStorage.setItem('label-generator-design-pages-v1', JSON.stringify(designPages)); } catch { /* Large image-based designs may exceed browser storage. Save a named template to keep a copy. */ }
-  }, [designPages]);
+    try {
+      localStorage.setItem('label-generator-design-pages-v1', JSON.stringify(designPages));
+      localStorage.setItem('label-generator-active-design-page-v1', activeDesignPageId);
+    } catch {
+      setStatus(old => ({ type: 'warning', text: 'This design could not be saved to browser storage. Export or save a template before closing the tab.' }));
+    }
+  }, [designPages, activeDesignPageId]);
   useEffect(() => {
-    if (skipDesignSyncRef.current) { skipDesignSyncRef.current = false; return; }
     setDesignPages(old => old.map(page => page.id === activeDesignPageId
       ? { ...page, name: designPageName, visualElements, labelBackground, settings, visualLayout }
       : page));
@@ -224,9 +281,6 @@ export default function App() {
     if (!data.length) throw new Error('No data rows found below the detected header row in "' + sheetName + '".');
 
     setRecords(data);
-    setVisualLayout(false);
-    setVisualElements([]);
-    setSelectedVisualId('');
     setHeaders(columnNames);
     setFileName(sourceName);
     setSelectedSheet(sheetName);
@@ -307,13 +361,15 @@ export default function App() {
   function toggleField(id) { setFields(old => old.map(field => field.id === id ? { ...field, enabled: !field.enabled } : field)); }
   function getLabelLines(record) {
     if (visualLayout) {
-      return visualElements.map(element => ({
-        id: element.id,
-        text: renderLine(element.text, record),
-        bold: element.bold,
-        fontSize: Number(element.fontSize) || Number(settings.fontSize),
-        align: element.align || 'left'
-      })).filter(line => line.text);
+      return visualElements
+        .filter(element => ['text', 'qr', 'barcode'].includes(element.type))
+        .map(element => ({
+          id: element.id,
+          text: renderLine(element.text || '', record),
+          bold: Boolean(element.bold),
+          fontSize: Number(element.fontSize) || Number(settings.fontSize),
+          align: element.align || 'left'
+        })).filter(line => line.text);
     }
     return customLayout
       ? lines.map(line => ({ id: line.id, text: renderLine(line.text, record), bold: line.bold })).filter(line => line.text)
@@ -447,7 +503,7 @@ export default function App() {
     const pages = saveCurrentDesignPage();
     const target = pages.find(page => page.id === id);
     if (!target) return;
-    setDesignPages(pages); skipDesignSyncRef.current = true;
+    setDesignPages(pages);
     setActiveDesignPageId(id); setDesignPageName(target.name);
     setVisualElements(target.visualElements || []); setLabelBackground(target.labelBackground || '');
     setSettings({ ...defaults, ...(target.settings || {}) }); setVisualLayout(Boolean(target.visualLayout));
@@ -456,7 +512,7 @@ export default function App() {
   function addDesignPage() {
     const pages = saveCurrentDesignPage(), id = 'design-' + Date.now();
     const page = { id, name:'Design ' + (pages.length+1), visualElements:[], labelBackground:'', settings:{...settings}, visualLayout:true };
-    setDesignPages([...pages,page]); skipDesignSyncRef.current = true;
+    setDesignPages([...pages,page]);
     setActiveDesignPageId(id); setDesignPageName(page.name);
     setVisualElements([]); setLabelBackground(''); setVisualLayout(true); setSelectedVisualId('');
     setStatus({type:'success',text:'New design page created.'});
@@ -465,18 +521,18 @@ export default function App() {
     const pages=saveCurrentDesignPage(), current=pages.find(page=>page.id===activeDesignPageId);
     if(!current) return;
     const id='design-'+Date.now();
-    const copy={...current,id,name:current.name+' copy',visualElements:current.visualElements.map((element,index)=>({...element,id:id+'-el-'+index}))};
-    setDesignPages([...pages,copy]); skipDesignSyncRef.current=true;
+    const copy={...current,id,name:current.name+' copy',visualElements:(current.visualElements || []).map((element,index)=>({...element,id:id+'-el-'+index}))};
+    setDesignPages([...pages,copy]);
     setActiveDesignPageId(id); setDesignPageName(copy.name); setVisualElements(copy.visualElements);
     setLabelBackground(copy.labelBackground||''); setSettings({...defaults,...(copy.settings||{})});
-    setVisualLayout(true); setSelectedVisualId(copy.visualElements[0]?.id||'');
+    setVisualLayout(Boolean(copy.visualLayout)); setSelectedVisualId(copy.visualElements[0]?.id||'');
     setStatus({type:'success',text:'Design page duplicated.'});
   }
   function deleteDesignPage() {
     if(designPages.length<=1) return setStatus({type:'error',text:'At least one design page must remain.'});
     const pages=saveCurrentDesignPage(), index=pages.findIndex(page=>page.id===activeDesignPageId);
     const remaining=pages.filter(page=>page.id!==activeDesignPageId), target=remaining[Math.max(0,index-1)]||remaining[0];
-    setDesignPages(remaining); skipDesignSyncRef.current=true;
+    setDesignPages(remaining);
     setActiveDesignPageId(target.id); setDesignPageName(target.name); setVisualElements(target.visualElements||[]);
     setLabelBackground(target.labelBackground||''); setSettings({...defaults,...(target.settings||{})});
     setVisualLayout(Boolean(target.visualLayout)); setSelectedVisualId(target.visualElements?.[0]?.id||'');
@@ -553,7 +609,7 @@ export default function App() {
   }
   function validateForOutput(source) {
     if (!source.length) { setStatus({ type: 'error', text: 'No records are selected for this action.' }); return false; }
-    if (visualLayout ? !visualElements.some(element => element.text.trim()) : customLayout ? !lines.some(line => line.text.trim()) : !enabledFields.length) { setStatus({ type: 'error', text: 'Add at least one visual element, select a field, or enter a label line.' }); return false; }
+    if (!hasLabelContent) { setStatus({ type: 'error', text: 'Add at least one visual element, select a field, or enter a label line.' }); return false; }
     if (!pageMetrics.valid) { setStatus({ type: 'error', text: 'Enter valid positive page and label dimensions, and non-negative gaps.' }); return false; }
     if (!pageMetrics.fits) { setStatus({ type: 'error', text: 'The label grid (' + pageMetrics.gridWidth.toFixed(1) + ' × ' + pageMetrics.gridHeight.toFixed(1) + ' mm) exceeds the printable area (' + pageMetrics.printableWidth.toFixed(1) + ' × ' + pageMetrics.printableHeight.toFixed(1) + ' mm). Reduce the label size, rows, columns or gaps before printing.' }); return false; }
     return true;
@@ -701,8 +757,9 @@ export default function App() {
               doc.setFontSize(size);
               doc.setTextColor(hexColor(element.color));
               const lineHeightForElement = size * 0.3528 * 1.2;
+              const maxLines = Math.max(1, Math.floor(Math.max(0, eh - 0.8) / lineHeightForElement));
               let baseline = ey + size * 0.3528 + 0.4;
-              linesWrapped.forEach(part => { doc.text(part, textX, baseline, { align }); baseline += lineHeightForElement; });
+              linesWrapped.slice(0, maxLines).forEach(part => { doc.text(part, textX, baseline, { align }); baseline += lineHeightForElement; });
             }
           }
         } else {
@@ -749,7 +806,7 @@ export default function App() {
     if (!template) { setStatus({ type: 'error', text: 'Choose a saved template first.' }); return; }
     if (!headers.length) { setStatus({ type: 'error', text: 'Upload a spreadsheet before applying a template.' }); return; }
     const mappedFields = headers.map((heading, index) => {
-      const saved = template.fields.find(field => norm(field.label) === norm(heading));
+      const saved = (template.fields || []).find(field => norm(field.label) === norm(heading));
       return { id: 'f' + index, label: heading, enabled: saved?.enabled ?? false, bold: saved?.bold ?? false, prefix: saved?.prefix ?? '', suffix: saved?.suffix ?? '' };
     });
     setFields(mappedFields);
@@ -761,15 +818,15 @@ export default function App() {
     setLabelBackground(template.labelBackground || '');
     if(template.designPages?.length){
       const active=template.designPages.find(page=>page.id===template.activeDesignPageId)||template.designPages[0];
-      setDesignPages(template.designPages);skipDesignSyncRef.current=true;
+      setDesignPages(template.designPages);
       setActiveDesignPageId(active.id);setDesignPageName(active.name||'Design 1');
       setVisualElements(active.visualElements||[]);setLabelBackground(active.labelBackground||'');
-      setSettings({...defaults,...(active.settings||template.settings)});setVisualLayout(Boolean(active.visualLayout));
+      setSettings({...defaults,...(active.settings || template.settings || {})});setVisualLayout(Boolean(active.visualLayout));
     } else {
       setDesignPages([{id:'design-1',name:'Design 1',visualElements:template.visualElements||[],labelBackground:template.labelBackground||'',settings:{...defaults,...template.settings},visualLayout:Boolean(template.visualLayout)}]);
       setActiveDesignPageId('design-1');setDesignPageName('Design 1');
     }
-    setSettings({ ...defaults, ...template.settings });
+    if (!template.designPages?.length) setSettings({ ...defaults, ...(template.settings || {}) });
     setTemplateName(template.name);
     setStatus({ type: 'success', text: 'Template "' + template.name + '" applied.' });
   }
@@ -881,7 +938,7 @@ export default function App() {
             {!visualElements.length ? <div className="empty">Add a field or text element to begin designing.</div> : <>
               <label>Element
                 <select value={selectedVisualId} onChange={e => setSelectedVisualId(e.target.value)}>
-                  {visualElements.map((element, index) => <option key={element.id} value={element.id}>Element {index + 1}: {element.text.slice(0, 24)}</option>)}
+                  {visualElements.map((element, index) => <option key={element.id} value={element.id}>Element {index + 1}: {String(element.text ?? '').slice(0, 24) || element.type}</option>)}
                 </select>
               </label>
               {(() => {
@@ -919,8 +976,7 @@ export default function App() {
                     <label>Font size (pt)<input type="number" min="5" max="36" value={element.fontSize} onChange={e => updateVisualElement(element.id, { fontSize: Math.max(5, Math.min(36, Number(e.target.value))) })}/></label>
                     <label>Alignment<select value={element.align} onChange={e => updateVisualElement(element.id, { align: e.target.value })}><option value="left">Left</option><option value="center">Center</option><option value="right">Right</option></select></label>
                   </div>
-                  <label className="bold-toggle visual-bold"><input type="checkbox" checked={element.bold} onChange={e => updateVisualElement(element.id, { bold: e.target.checked })}/> Bold text</label>
-                  {element.type === 'text' && <label className="bold-toggle visual-bold"><input type="checkbox" checked={element.bold} onChange={e => updateVisualElement(element.id, { bold: e.target.checked })}/> Bold text</label>}
+                  {element.type === 'text' && <label className="bold-toggle visual-bold"><input type="checkbox" checked={Boolean(element.bold)} onChange={e => updateVisualElement(element.id, { bold: e.target.checked })}/> Bold text</label>}
                   <button className="button danger-button" onClick={() => removeVisualElement(element.id)}><Trash2 size={14}/> Remove element</button>
                 </>;
               })()}
@@ -987,7 +1043,7 @@ export default function App() {
     </section>
 
     <section id="label-preview" className="panel preview-panel"><div className="section-title"><span className="step">06</span><div><h2>Live label preview</h2><p>Preview updates as you change content and layout, including visual element positions.</p></div><span className="live-tag"><Eye size={14}/> LIVE PREVIEW</span><button className="button outline print-button" onClick={() => exportPdf('all')}><FileSpreadsheet size={15}/> PDF</button><button className="button primary print-button" onClick={() => printLabels('all')}><Printer size={15}/> Print all</button></div>
-      {!records.length ? <div className="empty">Your labels will appear here after you upload a file.</div> : customLayout && !lines.some(line => line.text.trim()) ? <div className="empty">Add at least one custom line to preview.</div> : <><div className="preview-sheet"><div className="preview-grid">{previewRecords.map((record, index) => <React.Fragment key={index}>{renderLabel(record)}</React.Fragment>)}</div></div><div className="preview-footer">Showing {previewRecords.length} of {records.length} labels{records.length > 8 && <button className="text-button" onClick={() => setShowAll(value => !value)}>{showAll ? 'Show fewer' : 'Show more'}</button>}</div></>}
+      {!records.length ? <div className="empty">Your labels will appear here after you upload a file.</div> : !hasLabelContent ? <div className="empty">Add at least one field, text element, shape or image to preview.</div> : <><div className="preview-sheet"><div className="preview-grid">{previewRecords.map((record, index) => <React.Fragment key={index}>{renderLabel(record)}</React.Fragment>)}</div></div><div className="preview-footer">Showing {previewRecords.length} of {records.length} labels{records.length > 8 && <button className="text-button" onClick={() => setShowAll(value => !value)}>{showAll ? 'Show fewer' : 'Show more'}</button>}</div></>}
     </section>
 
     <footer>Custom Labels Generator · Excel-powered label printing</footer>
