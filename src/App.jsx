@@ -1056,6 +1056,13 @@ export default function App() {
   return <main className="app" style={vars}>
     <header className="header"><div className="brand"><FileSpreadsheet size={23}/></div><div className="heading"><span className="eyebrow">PRINT DESIGN WORKSPACE</span><h1>Custom Labels Generator</h1><p>Turn any spreadsheet into print-ready labels.</p></div><div className="header-actions"><button className="button secondary" onClick={loadSample}>Load sample</button><button className="button outline" onClick={() => exportPdf('all')} disabled={!records.length}>Export PDF</button><button className="button outline" onClick={() => exportExcel('all')} disabled={!records.length}>Export Excel</button><button className="button primary" onClick={() => printLabels('all')}><Printer size={16}/> Print all</button></div></header>
 
+    <section className="workspace-summary" aria-label="Workspace overview">
+      <div className="summary-card"><span>Source records</span><strong>{records.length.toLocaleString()}</strong><small>{fileName || 'No spreadsheet loaded yet'}</small></div>
+      <div className="summary-card"><span>Active design</span><strong>{designPageName || 'Untitled design'}</strong><small>{designPages.length} design page{designPages.length === 1 ? '' : 's'} in this project</small></div>
+      <div className="summary-card"><span>Sheet setup</span><strong>{settings.pageSize} · {settings.orientation}</strong><small>{settings.columns} columns × {settings.rows} rows</small></div>
+      <div className="summary-card"><span>Labels per sheet</span><strong>{perPage}</strong><small>{settings.labelWidth} × {settings.labelHeight} mm label size</small></div>
+    </section>
+
     <nav className="workflow-nav" aria-label="Label production workflow">
       <button type="button" onClick={() => document.getElementById('step-data')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}><span>01</span><strong>Import data</strong><small>Excel / CSV</small></button>
       <button type="button" onClick={() => document.getElementById('step-design')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}><span>02</span><strong>Design label</strong><small>Canvas / fields</small></button>
