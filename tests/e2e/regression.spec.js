@@ -85,7 +85,7 @@ test('persists independent page margins into the browser print rule', async ({ p
   await page.getByLabel('Right margin (mm)').fill('5.4');
   await page.getByLabel('Left margin (mm)').fill('4.2');
 
-  await expect(page.locator('#label-page-rule')).toContainText('12mm 5.4mm 12mm 4.2mm');
+  await expect.poll(() => page.locator('#label-page-rule').evaluate(style => style.textContent || '')).toContain('12mm 5.4mm 12mm 4.2mm');
 });
 
 test('blocks print when the label grid exceeds the printable page area', async ({ page }) => {
